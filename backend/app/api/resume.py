@@ -32,6 +32,9 @@ from app.models.schemas import (
 from app.services.resume_parser import parse_resume_file
 from app.services.job_scraper import scrape_job_info
 from app.agents.resume_optimizer_agent import ResumeOptimizerAgent
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -61,6 +64,8 @@ async def upload_resume(
     
     支持 PDF 和 Word 格式，上传后自动解析。
     """
+    logger.info(f"开始上传简历文件: {file.filename}")
+    
     # 验证文件类型
     allowed_types = {
         "application/pdf": "pdf",
@@ -70,16 +75,19 @@ async def upload_resume(
     
     content_type = file.content_type
     if content_type not in allowed_types:
+        logger.warning(f"不支持的文件类型: {content_type}")
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported file type: {content_type}. Allowed: PDF, DOCX",
         )
     
     file_type = allowed_types[content_type]
+    logger.debug(f"文件类型: {file_type}")
     
     # 验证文件大小
     content = await file.read()
     if len(content) > settings.max_upload_size_bytes:
+        logger.warning(f"文件过大: {len(content)/1024/1024:.2f}MB")
         raise HTTPException(
             status_code=400,
             detail=f"File too large. Max size: {settings.MAX_UPLOAD_SIZE_MB}MB",
@@ -88,6 +96,7 @@ async def upload_resume(
     try:
         # 获取用户
         user = await get_or_create_user(db)
+        logger.debug(f"获取用户: {user.email}")
         
         # 保存文件
         upload_dir = Path(settings.UPLOAD_DIR)
@@ -98,15 +107,19 @@ async def upload_resume(
         
         with open(file_path, "wb") as f:
             f.write(content)
+        logger.debug(f"文件保存成功: {file_path}")
         
         # 解析简历
         try:
+            logger.info("开始解析简历")
             resume_text = parse_resume_file(
                 file_content=content,
                 file_type=file_type,
             )
             parse_status = ResumeStatus.PARSED
+            logger.info("简历解析成功")
         except Exception as e:
+            logger.error(f"简历解析失败: {str(e)}")
             resume_text = None
             parse_status = ResumeStatus.FAILED
         
@@ -125,6 +138,7 @@ async def upload_resume(
         await db.commit()
         await db.refresh(resume)
         
+        logger.info(f"简历上传成功，ID: {resume.id}")
         return SuccessResponse(
             success=True,
             message="Resume uploaded successfully",
@@ -139,6 +153,7 @@ async def upload_resume(
         )
     
     except Exception as e:
+        logger.error(f"上传简历失败: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to upload resume: {str(e)}",
@@ -157,17 +172,21 @@ async def optimize_resume(
     
     基于目标岗位需求优化简历内容。
     """
+    logger.info(f"开始优化简历，ID: {resume_id}")
+    
     # 获取简历记录
     result = await db.execute(select(Resume).where(Resume.id == resume_id))
     resume = result.scalar_one_or_none()
     
     if not resume:
+        logger.warning(f"简历不存在，ID: {resume_id}")
         raise HTTPException(status_code=404, detail="Resume not found")
     
     # 使用新的目标岗位链接或已有的
     job_url = target_job_url or resume.target_job_url
     
     if not job_url:
+        logger.warning(f"目标岗位 URL 缺失，ID: {resume_id}")
         raise HTTPException(
             status_code=400,
             detail="Target job URL is required for optimization",
@@ -175,6 +194,7 @@ async def optimize_resume(
     
     # 检查简历是否已解析
     if not resume.original_text:
+        logger.warning(f"简历未解析，ID: {resume_id}")
         raise HTTPException(
             status_code=400,
             detail="Resume has not been parsed. Please re-upload.",
@@ -185,9 +205,11 @@ async def optimize_resume(
         resume.status = ResumeStatus.OPTIMIZING
         resume.target_job_url = job_url
         await db.commit()
+        logger.debug(f"更新简历状态为 OPTIMIZING，ID: {resume_id}")
         
         # 爬取岗位信息
         try:
+            logger.info(f"开始爬取岗位信息: {job_url}")
             job_info = scrape_job_info(job_url)
             job_desc = f"""
 岗位名称：{job_info.title}
@@ -203,23 +225,29 @@ async def optimize_resume(
 """
             resume.target_job_title = job_info.title
             resume.job_description = job_desc
+            logger.info(f"岗位信息爬取成功: {job_info.title}")
         except Exception as e:
             # 如果爬取失败，使用 URL 作为描述
+            logger.error(f"岗位信息爬取失败: {str(e)}")
             job_desc = f"目标岗位链接：{job_url}"
             resume.job_description = job_desc
         
         # 运行简历优化智能体
+        logger.info("开始运行简历优化智能体")
         agent = ResumeOptimizerAgent()
         result_state = await agent.run(
             resume_text=resume.original_text,
             job_desc=job_desc,
             job_url=job_url,
         )
+        logger.debug("简历优化智能体运行完成")
         
         # 保存结果
         if result_state.get("error"):
+            error_msg = result_state["error"]
             resume.status = ResumeStatus.FAILED
-            resume.error_message = result_state["error"]
+            resume.error_message = error_msg
+            logger.error(f"简历优化失败: {error_msg}")
         else:
             resume.status = ResumeStatus.OPTIMIZED
             resume.extracted_info = json.dumps(
@@ -231,6 +259,7 @@ async def optimize_resume(
                 ensure_ascii=False,
             )
             resume.optimized_resume = result_state.get("optimized_resume", "")
+            logger.info("简历优化成功")
         
         await db.commit()
         await db.refresh(resume)
@@ -249,6 +278,7 @@ async def optimize_resume(
         )
     
     except Exception as e:
+        logger.error(f"优化简历失败: {str(e)}")
         resume.status = ResumeStatus.FAILED
         resume.error_message = str(e)
         await db.commit()
@@ -267,12 +297,15 @@ async def get_resume(
     """
     获取简历详情
     """
+    logger.info(f"获取简历详情，ID: {resume_id}")
     result = await db.execute(select(Resume).where(Resume.id == resume_id))
     resume = result.scalar_one_or_none()
     
     if not resume:
+        logger.warning(f"简历不存在，ID: {resume_id}")
         raise HTTPException(status_code=404, detail="Resume not found")
     
+    logger.debug(f"获取简历详情成功，ID: {resume_id}")
     return SuccessResponse(
         success=True,
         message="Resume retrieved successfully",
@@ -304,13 +337,16 @@ async def download_optimized_resume(
     
     支持 Markdown (md) 格式。PDF 格式需要额外处理。
     """
+    logger.info(f"下载优化后的简历，ID: {resume_id}, 格式: {format}")
     result = await db.execute(select(Resume).where(Resume.id == resume_id))
     resume = result.scalar_one_or_none()
     
     if not resume:
+        logger.warning(f"简历不存在，ID: {resume_id}")
         raise HTTPException(status_code=404, detail="Resume not found")
     
     if not resume.optimized_resume:
+        logger.warning(f"简历未优化，ID: {resume_id}")
         raise HTTPException(
             status_code=400,
             detail="Resume has not been optimized yet",
@@ -319,6 +355,7 @@ async def download_optimized_resume(
     if format.lower() == "md":
         # 返回 Markdown 文件
         filename = f"optimized_resume_{resume_id}.md"
+        logger.debug(f"生成 Markdown 文件: {filename}")
         return Response(
             content=resume.optimized_resume,
             media_type="text/markdown",
@@ -327,6 +364,7 @@ async def download_optimized_resume(
             },
         )
     else:
+        logger.warning(f"不支持的格式: {format}")
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported format: {format}. Supported: md",
@@ -342,6 +380,7 @@ async def list_resumes(
     """
     获取简历列表
     """
+    logger.info(f"获取简历列表，跳过: {skip}, 限制: {limit}")
     user = await get_or_create_user(db)
     
     result = await db.execute(
@@ -353,6 +392,7 @@ async def list_resumes(
     )
     resumes = result.scalars().all()
     
+    logger.debug(f"获取简历列表成功，数量: {len(resumes)}")
     return SuccessResponse(
         success=True,
         message="Resumes retrieved successfully",
@@ -383,10 +423,12 @@ async def delete_resume(
     """
     删除简历
     """
+    logger.info(f"删除简历，ID: {resume_id}")
     result = await db.execute(select(Resume).where(Resume.id == resume_id))
     resume = result.scalar_one_or_none()
     
     if not resume:
+        logger.warning(f"简历不存在，ID: {resume_id}")
         raise HTTPException(status_code=404, detail="Resume not found")
     
     # 删除文件
@@ -394,13 +436,15 @@ async def delete_resume(
         file_path = Path(resume.file_path)
         if file_path.exists():
             file_path.unlink()
-    except Exception:
-        pass  # 忽略文件删除错误
+            logger.debug(f"删除文件成功: {file_path}")
+    except Exception as e:
+        logger.warning(f"删除文件失败: {str(e)}")
     
     # 删除数据库记录
     await db.delete(resume)
     await db.commit()
     
+    logger.info(f"删除简历成功，ID: {resume_id}")
     return SuccessResponse(
         success=True,
         message="Resume deleted successfully",

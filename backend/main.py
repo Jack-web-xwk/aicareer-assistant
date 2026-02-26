@@ -15,6 +15,10 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.core.database import create_tables
 from app.api import router as api_router
+from app.utils.logger import get_logger
+
+# 初始化日志
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
@@ -25,23 +29,27 @@ async def lifespan(app: FastAPI):
     - 关闭时：清理资源
     """
     # Startup: 创建数据库表
+    logger.info("开始初始化数据库表")
     await create_tables()
+    logger.info("数据库表初始化完成")
     
     # Startup: 创建上传目录
     upload_dir = Path(settings.UPLOAD_DIR)
     upload_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"上传目录创建完成: {upload_dir}")
     
     # Startup: 创建数据目录
     data_dir = Path("./data")
     data_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(f"数据目录创建完成: {data_dir}")
     
-    print(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} started!")
-    print(f"📚 API Docs: http://localhost:8000/docs")
+    logger.info(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} started!")
+    logger.info(f"📚 API Docs: http://localhost:8000/docs")
     
     yield
     
     # Shutdown: 清理资源
-    print(f"👋 {settings.APP_NAME} shutting down...")
+    logger.info(f"👋 {settings.APP_NAME} shutting down...")
 
 
 # 创建 FastAPI 应用实例

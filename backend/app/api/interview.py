@@ -24,6 +24,9 @@ from app.models.schemas import (
     SuccessResponse,
 )
 from app.agents.interview_agent import InterviewAgent, InterviewState
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -55,23 +58,28 @@ async def start_interview(
     
     创建面试会话，初始化面试官，返回第一个问题。
     """
+    logger.info(f"开始面试，岗位: {request.job_role}, 技术栈: {request.tech_stack}")
     try:
         # 获取用户
         user = await get_or_create_user(db)
+        logger.debug(f"获取用户: {user.email}")
         
         # 创建会话 ID
         session_id = str(uuid.uuid4())
+        logger.debug(f"创建会话 ID: {session_id}")
         
         # 创建面试智能体
         agent = InterviewAgent()
         
         # 初始化面试
+        logger.info("初始化面试智能体")
         state = await agent.start_interview(
             job_role=request.job_role,
             tech_stack=request.tech_stack,
             difficulty_level=request.difficulty_level,
             max_questions=settings.MAX_INTERVIEW_QUESTIONS,
         )
+        logger.debug("面试智能体初始化完成")
         
         # 存储会话状态
         active_sessions[session_id] = state
@@ -95,6 +103,7 @@ async def start_interview(
         await db.commit()
         await db.refresh(record)
         
+        logger.info(f"面试开始成功，会话 ID: {session_id}")
         return SuccessResponse(
             success=True,
             message="Interview started successfully",
@@ -111,6 +120,7 @@ async def start_interview(
         )
     
     except Exception as e:
+        logger.error(f"开始面试失败: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to start interview: {str(e)}",
@@ -129,29 +139,35 @@ async def submit_answer(
     
     支持文本或音频输入。
     """
+    logger.info(f"提交面试回答，会话 ID: {session_id}")
     # 获取会话状态
     state = active_sessions.get(session_id)
     
     if not state:
         # 尝试从数据库恢复
+        logger.warning(f"会话状态不存在，尝试从数据库恢复: {session_id}")
         result = await db.execute(
             select(InterviewRecord).where(InterviewRecord.session_id == session_id)
         )
         record = result.scalar_one_or_none()
         
         if not record:
+            logger.warning(f"面试会话不存在: {session_id}")
             raise HTTPException(status_code=404, detail="Interview session not found")
         
         if record.status != InterviewStatus.IN_PROGRESS:
+            logger.warning(f"面试已结束: {session_id}")
             raise HTTPException(status_code=400, detail="Interview has already ended")
         
         # 恢复状态（简化处理）
+        logger.warning(f"会话已过期: {session_id}")
         raise HTTPException(
             status_code=400,
             detail="Session expired. Please start a new interview.",
         )
     
     if not text_answer and not audio_base64:
+        logger.warning(f"回答内容为空: {session_id}")
         raise HTTPException(
             status_code=400,
             detail="Either text_answer or audio_base64 is required",
@@ -162,11 +178,13 @@ async def submit_answer(
         agent = InterviewAgent()
         
         # 处理回答
+        logger.info("处理面试回答")
         new_state = await agent.process_answer(
             state=state,
             audio_input=audio_base64,
             text_input=text_answer,
         )
+        logger.debug("回答处理完成")
         
         # 更新会话状态
         active_sessions[session_id] = new_state
@@ -203,9 +221,11 @@ async def submit_answer(
                     ensure_ascii=False,
                 )
                 record.detailed_report = report.get("detailed_report", "")
+                logger.info(f"面试完成，会话 ID: {session_id}")
             
             await db.commit()
         
+        logger.info(f"回答处理成功，会话 ID: {session_id}")
         return SuccessResponse(
             success=True,
             message="Answer processed successfully",
@@ -222,6 +242,7 @@ async def submit_answer(
         )
     
     except Exception as e:
+        logger.error(f"处理回答失败: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to process answer: {str(e)}",
@@ -236,17 +257,20 @@ async def get_interview_status(
     """
     获取面试状态
     """
+    logger.info(f"获取面试状态，会话 ID: {session_id}")
     result = await db.execute(
         select(InterviewRecord).where(InterviewRecord.session_id == session_id)
     )
     record = result.scalar_one_or_none()
     
     if not record:
+        logger.warning(f"面试会话不存在: {session_id}")
         raise HTTPException(status_code=404, detail="Interview session not found")
     
     # 获取内存中的状态
     state = active_sessions.get(session_id, {})
     
+    logger.debug(f"获取面试状态成功，会话 ID: {session_id}")
     return SuccessResponse(
         success=True,
         message="Interview status retrieved successfully",
@@ -273,20 +297,24 @@ async def get_interview_report(
     """
     获取面试评估报告
     """
+    logger.info(f"获取面试评估报告，会话 ID: {session_id}")
     result = await db.execute(
         select(InterviewRecord).where(InterviewRecord.session_id == session_id)
     )
     record = result.scalar_one_or_none()
     
     if not record:
+        logger.warning(f"面试会话不存在: {session_id}")
         raise HTTPException(status_code=404, detail="Interview session not found")
     
     if record.status != InterviewStatus.COMPLETED:
+        logger.warning(f"面试未完成: {session_id}")
         raise HTTPException(
             status_code=400,
             detail="Interview has not completed yet",
         )
     
+    logger.debug(f"获取面试评估报告成功，会话 ID: {session_id}")
     return SuccessResponse(
         success=True,
         message="Interview report retrieved successfully",
@@ -314,15 +342,18 @@ async def end_interview(
     """
     提前结束面试
     """
+    logger.info(f"提前结束面试，会话 ID: {session_id}")
     result = await db.execute(
         select(InterviewRecord).where(InterviewRecord.session_id == session_id)
     )
     record = result.scalar_one_or_none()
     
     if not record:
+        logger.warning(f"面试会话不存在: {session_id}")
         raise HTTPException(status_code=404, detail="Interview session not found")
     
     if record.status != InterviewStatus.IN_PROGRESS:
+        logger.warning(f"面试不在进行中: {session_id}")
         raise HTTPException(status_code=400, detail="Interview is not in progress")
     
     # 获取会话状态
@@ -346,9 +377,11 @@ async def end_interview(
         
         # 清理会话
         del active_sessions[session_id]
+        logger.info(f"面试完成并清理会话，会话 ID: {session_id}")
     else:
         record.status = InterviewStatus.CANCELLED
         record.ended_at = datetime.utcnow()
+        logger.info(f"面试取消，会话 ID: {session_id}")
     
     await db.commit()
     
@@ -374,12 +407,14 @@ async def interview_websocket(
     - 客户端发送: {"type": "audio", "audio_base64": "..."} 或 {"type": "text", "content": "..."}
     - 服务器响应: {"type": "response", "question": "...", "audio_base64": "...", "is_finished": false}
     """
+    logger.info(f"WebSocket 连接，会话 ID: {session_id}")
     await websocket.accept()
     
     # 检查会话是否存在
     state = active_sessions.get(session_id)
     
     if not state:
+        logger.warning(f"会话不存在，WebSocket 连接失败: {session_id}")
         await websocket.send_json({
             "type": "error",
             "message": "Session not found. Please start a new interview.",
@@ -409,6 +444,7 @@ async def interview_websocket(
             if msg_type == "audio":
                 # 处理音频输入
                 audio_base64 = data.get("audio_base64")
+                logger.debug("处理音频输入")
                 new_state = await agent.process_answer(
                     state=state,
                     audio_input=audio_base64,
@@ -416,16 +452,19 @@ async def interview_websocket(
             elif msg_type == "text":
                 # 处理文本输入
                 text_content = data.get("content")
+                logger.debug("处理文本输入")
                 new_state = await agent.process_answer(
                     state=state,
                     text_input=text_content,
                 )
             elif msg_type == "end":
                 # 提前结束
+                logger.info("提前结束面试")
                 state["is_finished"] = True
                 new_state = await agent._generate_report(state)
                 new_state["is_finished"] = True
             else:
+                logger.warning(f"未知消息类型: {msg_type}")
                 await websocket.send_json({
                     "type": "error",
                     "message": f"Unknown message type: {msg_type}",
@@ -452,6 +491,7 @@ async def interview_websocket(
                 # 清理会话
                 if session_id in active_sessions:
                     del active_sessions[session_id]
+                logger.info(f"面试完成，WebSocket 连接关闭: {session_id}")
             
             await websocket.send_json(response)
             
@@ -460,8 +500,10 @@ async def interview_websocket(
     
     except WebSocketDisconnect:
         # 客户端断开连接
+        logger.info(f"WebSocket 客户端断开连接: {session_id}")
         pass
     except Exception as e:
+        logger.error(f"WebSocket 错误: {str(e)}")
         await websocket.send_json({
             "type": "error",
             "message": str(e),
@@ -482,6 +524,7 @@ async def list_interviews(
     """
     获取面试记录列表
     """
+    logger.info(f"获取面试记录列表，跳过: {skip}, 限制: {limit}")
     user = await get_or_create_user(db)
     
     result = await db.execute(
@@ -493,6 +536,7 @@ async def list_interviews(
     )
     records = result.scalars().all()
     
+    logger.debug(f"获取面试记录列表成功，数量: {len(records)}")
     return SuccessResponse(
         success=True,
         message="Interviews retrieved successfully",

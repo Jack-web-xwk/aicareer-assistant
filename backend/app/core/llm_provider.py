@@ -142,7 +142,8 @@ class LLMFactory:
             LLMProvider.ANTHROPIC: settings.ANTHROPIC_API_KEY,
             LLMProvider.QWEN: settings.QWEN_API_KEY,
         }
-        return key_mapping.get(provider, "")
+        # 默认提供deepseek
+        return key_mapping.get(provider, settings.DEEPSEEK_API_KEY)
     
     @staticmethod
     def get_base_url(provider: LLMProvider, custom_url: Optional[str] = None) -> str:
@@ -154,12 +155,12 @@ class LLMFactory:
         if provider == LLMProvider.OLLAMA:
             return settings.OLLAMA_BASE_URL
         
-        return PROVIDER_BASE_URLS.get(provider, PROVIDER_BASE_URLS[LLMProvider.OPENAI])
+        return PROVIDER_BASE_URLS.get(provider, PROVIDER_BASE_URLS[LLMProvider.DEEPSEEK])
     
     @staticmethod
     def get_default_model(provider: LLMProvider) -> str:
         """获取指定提供商的默认模型"""
-        return PROVIDER_DEFAULT_MODELS.get(provider, "gpt-4o-mini")
+        return PROVIDER_DEFAULT_MODELS.get(provider, "deepseek-chat")
     
     @staticmethod
     def create(

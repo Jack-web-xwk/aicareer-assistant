@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     
     # ========== LLM Provider Configuration ==========
     # 通用 LLM 配置（优先级最高）
-    LLM_PROVIDER: str = "openai"  # openai, deepseek, zhipu, ollama, anthropic, qwen
+    LLM_PROVIDER: str = "deepseek"  # openai, deepseek, zhipu, ollama, anthropic, qwen
     LLM_MODEL: str = ""           # 留空则使用各提供商默认模型
     
     # OpenAI Configuration
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o-mini"
     
     # DeepSeek Configuration
-    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_API_KEY: str = "sk-3c374bea34474a5196427330fdfaddd4"
     DEEPSEEK_MODEL: str = "deepseek-chat"
     
     # 智谱 GLM Configuration
