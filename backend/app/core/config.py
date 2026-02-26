@@ -17,9 +17,35 @@ class Settings(BaseSettings):
     从环境变量或 .env 文件读取配置，支持类型验证和默认值。
     """
     
+    # ========== LLM Provider Configuration ==========
+    # 通用 LLM 配置（优先级最高）
+    LLM_PROVIDER: str = "openai"  # openai, deepseek, zhipu, ollama, anthropic, qwen
+    LLM_MODEL: str = ""           # 留空则使用各提供商默认模型
+    
     # OpenAI Configuration
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
+    
+    # DeepSeek Configuration
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_MODEL: str = "deepseek-chat"
+    
+    # 智谱 GLM Configuration
+    ZHIPU_API_KEY: str = ""
+    ZHIPU_MODEL: str = "glm-4-flash"
+    
+    # Ollama Configuration (本地模型)
+    OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
+    OLLAMA_API_KEY: str = "ollama"  # Ollama 不需要真实 key
+    OLLAMA_MODEL: str = "llama3.2"
+    
+    # Anthropic Claude Configuration
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_MODEL: str = "claude-3-5-sonnet-20241022"
+    
+    # 通义千问 Qwen Configuration
+    QWEN_API_KEY: str = ""
+    QWEN_MODEL: str = "qwen-turbo"
     
     # Database Configuration
     DATABASE_URL: str = "sqlite+aiosqlite:///./data/career_assistant.db"

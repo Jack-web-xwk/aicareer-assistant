@@ -6,15 +6,18 @@ Resume Optimizer Agent - 简历优化智能体
 2. 分析岗位需求
 3. 内容匹配
 4. 生成优化简历
+
+支持多种 LLM 提供商：OpenAI, DeepSeek, 智谱GLM, Ollama, Anthropic, Qwen
 """
 
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict, Union
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+from langchain_core.language_models import BaseChatModel
 from langgraph.graph import StateGraph, END
 
 from app.core.config import settings
+from app.core.llm_provider import LLMFactory, LLMProvider, create_llm
 
 
 class ResumeOptimizerState(TypedDict):
@@ -47,23 +50,41 @@ class ResumeOptimizerAgent:
     
     使用 LangGraph 构建的简历优化流程：
     extract_resume_info → analyze_job_requirements → match_content → generate_optimized_resume
+    
+    支持多种 LLM 提供商：
+    - OpenAI (默认)
+    - DeepSeek (deepseek-chat, deepseek-reasoner)
+    - 智谱 GLM (glm-4, glm-4-flash)
+    - Ollama (本地模型)
+    - Anthropic Claude
+    - 通义千问 Qwen
     """
     
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+    def __init__(
+        self,
+        provider: Optional[Union[LLMProvider, str]] = None,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        **llm_kwargs: Any,
+    ):
         """
         初始化智能体
         
         Args:
-            api_key: OpenAI API Key
+            provider: LLM 提供商 (openai/deepseek/zhipu/ollama/anthropic/qwen)
             model: 使用的模型名称
+            api_key: API Key (可选，默认从环境变量读取)
+            **llm_kwargs: 传递给 LLM 的其他参数
         """
-        self.api_key = api_key or settings.OPENAI_API_KEY
-        self.model = model or settings.OPENAI_MODEL
+        self.provider = provider
+        self.model = model
         
-        self.llm = ChatOpenAI(
-            api_key=self.api_key,
-            model=self.model,
-            temperature=0.3,
+        # 使用 LLM Factory 创建简历优化专用 LLM (较低温度，更精准)
+        self.llm: BaseChatModel = LLMFactory.create_for_resume(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            **llm_kwargs,
         )
         
         # 构建图
@@ -460,17 +481,39 @@ class ResumeOptimizerAgent:
 
 # 便捷函数
 def create_resume_optimizer_graph(
-    api_key: Optional[str] = None,
+    provider: Optional[Union[LLMProvider, str]] = None,
     model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    **llm_kwargs: Any,
 ) -> ResumeOptimizerAgent:
     """
     创建简历优化智能体实例
     
     Args:
-        api_key: OpenAI API Key
-        model: 使用的模型
+        provider: LLM 提供商 (openai/deepseek/zhipu/ollama/anthropic/qwen)
+        model: 使用的模型名称
+        api_key: API Key (可选)
+        **llm_kwargs: 传递给 LLM 的其他参数
     
     Returns:
         ResumeOptimizerAgent 实例
+    
+    Examples:
+        # 使用默认配置 (从环境变量读取)
+        agent = create_resume_optimizer_graph()
+        
+        # 使用 DeepSeek
+        agent = create_resume_optimizer_graph(provider="deepseek")
+        
+        # 使用智谱 GLM-4
+        agent = create_resume_optimizer_graph(provider="zhipu", model="glm-4")
+        
+        # 使用本地 Ollama
+        agent = create_resume_optimizer_graph(provider="ollama", model="qwen2.5")
     """
-    return ResumeOptimizerAgent(api_key=api_key, model=model)
+    return ResumeOptimizerAgent(
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        **llm_kwargs,
+    )

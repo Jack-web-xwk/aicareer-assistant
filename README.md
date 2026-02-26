@@ -78,7 +78,7 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 # 配置环境变量
-cp .env.example .env
+cp env.example .env
 # 编辑 .env 文件，填入 OPENAI_API_KEY
 
 # 初始化数据库

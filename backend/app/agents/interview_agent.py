@@ -7,16 +7,19 @@ Interview Agent - 面试模拟智能体
 3. 生成回复
 4. 文字转语音
 5. 检查是否结束
+
+支持多种 LLM 提供商：OpenAI, DeepSeek, 智谱GLM, Ollama, Anthropic, Qwen
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional, TypedDict
+from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+from langchain_core.language_models import BaseChatModel
 from langgraph.graph import StateGraph, END
 
 from app.core.config import settings
+from app.core.llm_provider import LLMFactory, LLMProvider, create_llm
 from app.services.audio_processor import AudioProcessor
 
 
@@ -69,26 +72,46 @@ class InterviewAgent:
     
     使用 LangGraph 构建的面试模拟流程：
     init_interview → [transcribe_audio → generate_response → synthesize_speech → check_finish] (循环)
+    
+    支持多种 LLM 提供商：
+    - OpenAI (默认)
+    - DeepSeek (deepseek-chat, deepseek-reasoner)
+    - 智谱 GLM (glm-4, glm-4-flash)
+    - Ollama (本地模型)
+    - Anthropic Claude
+    - 通义千问 Qwen
     """
     
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+    def __init__(
+        self,
+        provider: Optional[Union[LLMProvider, str]] = None,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        **llm_kwargs: Any,
+    ):
         """
         初始化智能体
         
         Args:
-            api_key: OpenAI API Key
+            provider: LLM 提供商 (openai/deepseek/zhipu/ollama/anthropic/qwen)
             model: 使用的模型名称
+            api_key: API Key (可选，默认从环境变量读取)
+            **llm_kwargs: 传递给 LLM 的其他参数
         """
-        self.api_key = api_key or settings.OPENAI_API_KEY
-        self.model = model or settings.OPENAI_MODEL
+        self.provider = provider
+        self.model = model
         
-        self.llm = ChatOpenAI(
-            api_key=self.api_key,
-            model=self.model,
-            temperature=0.7,
+        # 使用 LLM Factory 创建面试专用 LLM
+        self.llm: BaseChatModel = LLMFactory.create_for_interview(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            **llm_kwargs,
         )
         
-        self.audio_processor = AudioProcessor(api_key=self.api_key)
+        # 音频处理器仍使用 OpenAI (Whisper/TTS)
+        audio_api_key = api_key if provider in [None, LLMProvider.OPENAI, "openai"] else settings.OPENAI_API_KEY
+        self.audio_processor = AudioProcessor(api_key=audio_api_key)
         
         # 构建图
         self.graph = self._build_graph()
@@ -603,17 +626,42 @@ class InterviewAgent:
 
 # 便捷函数
 def create_interview_graph(
-    api_key: Optional[str] = None,
+    provider: Optional[Union[LLMProvider, str]] = None,
     model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    **llm_kwargs: Any,
 ) -> InterviewAgent:
     """
     创建面试模拟智能体实例
     
     Args:
-        api_key: OpenAI API Key
-        model: 使用的模型
+        provider: LLM 提供商 (openai/deepseek/zhipu/ollama/anthropic/qwen)
+        model: 使用的模型名称
+        api_key: API Key (可选)
+        **llm_kwargs: 传递给 LLM 的其他参数
     
     Returns:
         InterviewAgent 实例
+    
+    Examples:
+        # 使用默认配置 (从环境变量读取)
+        agent = create_interview_graph()
+        
+        # 使用 DeepSeek
+        agent = create_interview_graph(provider="deepseek")
+        
+        # 使用 DeepSeek R1 推理模型
+        agent = create_interview_graph(provider="deepseek", model="deepseek-reasoner")
+        
+        # 使用智谱 GLM
+        agent = create_interview_graph(provider="zhipu", model="glm-4")
+        
+        # 使用本地 Ollama
+        agent = create_interview_graph(provider="ollama", model="llama3.2")
     """
-    return InterviewAgent(api_key=api_key, model=model)
+    return InterviewAgent(
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        **llm_kwargs,
+    )

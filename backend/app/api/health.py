@@ -1,7 +1,7 @@
 """
 Health Check API - 健康检查接口
 
-提供服务健康状态检查。
+提供服务健康状态检查和 LLM 配置信息。
 """
 
 from datetime import datetime
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.llm_provider import LLMFactory, LLMProvider, get_llm_info
 from app.models.schemas import SuccessResponse
 
 router = APIRouter()
@@ -77,7 +78,7 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
     """
     checks = {
         "database": False,
-        "openai_api_key": False,
+        "llm_api_key": False,
     }
     
     # 检查数据库
@@ -88,8 +89,16 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
     except Exception:
         pass
     
-    # 检查 OpenAI API Key
-    checks["openai_api_key"] = bool(settings.OPENAI_API_KEY)
+    # 检查 LLM API Key (根据当前配置的提供商)
+    try:
+        provider_str = settings.LLM_PROVIDER.lower()
+        provider = LLMProvider(provider_str)
+        api_key = LLMFactory.get_api_key(provider)
+        # Ollama 不需要真实的 API Key
+        checks["llm_api_key"] = bool(api_key) or provider == LLMProvider.OLLAMA
+    except Exception:
+        # 默认检查 OpenAI
+        checks["llm_api_key"] = bool(settings.OPENAI_API_KEY)
     
     all_ready = all(checks.values())
     
@@ -99,6 +108,60 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
         data={
             "ready": all_ready,
             "checks": checks,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
+
+
+@router.get("/llm", response_model=SuccessResponse)
+async def llm_config():
+    """
+    LLM 配置信息
+    
+    返回当前 LLM 提供商配置和可用模型列表。
+    """
+    llm_info = get_llm_info()
+    
+    # 检查 API Key 是否配置
+    try:
+        provider = LLMProvider(llm_info["provider"])
+        api_key = LLMFactory.get_api_key(provider)
+        has_api_key = bool(api_key) or provider == LLMProvider.OLLAMA
+    except Exception:
+        has_api_key = False
+    
+    return SuccessResponse(
+        success=True,
+        message="LLM configuration",
+        data={
+            **llm_info,
+            "api_key_configured": has_api_key,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
+
+
+@router.get("/llm/providers", response_model=SuccessResponse)
+async def list_llm_providers():
+    """
+    列出所有支持的 LLM 提供商
+    
+    返回所有可用的提供商及其支持的模型。
+    """
+    providers_info = {}
+    
+    for provider in LLMProvider:
+        providers_info[provider.value] = {
+            "models": LLMFactory.list_models(provider),
+            "default_model": LLMFactory.get_default_model(provider),
+        }
+    
+    return SuccessResponse(
+        success=True,
+        message="Available LLM providers",
+        data={
+            "providers": providers_info,
+            "current_provider": settings.LLM_PROVIDER,
             "timestamp": datetime.utcnow().isoformat(),
         },
     )
