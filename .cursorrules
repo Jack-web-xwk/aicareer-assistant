@@ -1,0 +1,10 @@
+## [Frontend: Vue 3 & TypeScript Rules]
+
+### 1. 架构与模式
+- **组合式 API**: 必须使用 `<script setup>` 语法。
+- **类型安全**: 严禁使用 `any`。所有 API 返回值、组件 Props、Reactive 状态必须定义 `interface` 或 `type`。
+- **状态管理**: 所有的全局状态（用户信息、Agent 任务列表、实时行情缓存）必须放在 `Pinia` Store 中，禁止在组件间乱传状态。
+
+### 2. UI 与样式
+- **组件库**: 优先使用 `Element Plus` 或 `Naive UI` 的内置组件，严禁手写复杂的原始 CSS。
+- **响应式布局**: 重点保证“监控看板”在不同分辨率下的适配，使用 Flex 或 Grid 布局。

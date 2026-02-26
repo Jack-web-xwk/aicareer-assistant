@@ -1,0 +1,21 @@
+"""
+API Routes - API 路由
+
+汇总所有 API 路由。
+"""
+
+from fastapi import APIRouter
+
+from .health import router as health_router
+from .resume import router as resume_router
+from .interview import router as interview_router
+
+# 创建主路由
+router = APIRouter()
+
+# 注册子路由
+router.include_router(health_router, prefix="/health", tags=["Health"])
+router.include_router(resume_router, prefix="/resume", tags=["Resume"])
+router.include_router(interview_router, prefix="/interview", tags=["Interview"])
+
+__all__ = ["router"]
