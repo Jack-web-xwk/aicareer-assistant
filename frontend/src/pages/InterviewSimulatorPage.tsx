@@ -14,6 +14,7 @@ import {
   List,
   Avatar,
   Divider,
+  Spin,
 } from 'antd'
 import {
   AudioOutlined,
@@ -24,10 +25,11 @@ import {
   PlayCircleOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
+  LoadingOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import { interviewApi } from '../services/api'
-import type { InterviewSession, InterviewReport, WSMessage } from '../types'
+import type { InterviewSession, InterviewReport, WSMessage, SSEMessage } from '../types'
 
 const { Title, Paragraph, Text } = Typography
 const { TextArea } = Input
@@ -136,14 +138,18 @@ function InterviewSimulatorPage() {
           const data: WSMessage = JSON.parse(event.data)
           
           if (data.type === 'response') {
-            setMessages((prev) => [
-              ...prev,
-              {
-                role: 'assistant',
-                content: data.current_question || '面试结束，正在生成报告...',
-                timestamp: new Date(),
-              },
-            ])
+            // Update the placeholder message instead of adding a new one
+            setMessages((prev) => {
+              const newMessages = [...prev]
+              const lastIndex = newMessages.length - 1
+              if (lastIndex >= 0 && newMessages[lastIndex].role === 'assistant') {
+                newMessages[lastIndex] = {
+                  ...newMessages[lastIndex],
+                  content: data.current_question || '面试结束，正在生成报告...',
+                }
+              }
+              return newMessages
+            })
 
             if (data.is_finished && data.report) {
               setReport(data.report)
@@ -151,6 +157,8 @@ function InterviewSimulatorPage() {
             }
           } else if (data.type === 'error') {
             message.error(data.message || '发生错误')
+            // Remove the placeholder message
+            setMessages((prev) => prev.slice(0, -1))
           }
         }
 
@@ -182,40 +190,104 @@ function InterviewSimulatorPage() {
       },
     ])
 
+    // Add a placeholder for AI response
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: 'assistant',
+        content: '正在思考中...',
+        timestamp: new Date(),
+      },
+    ])
+
+    setLoading(true)
+
     // Try WebSocket first
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'text', content: userMessage }))
+      setLoading(false)
     } else {
-      // Fallback to REST API
-      setLoading(true)
+      // Use SSE streaming
       try {
-        const response = await interviewApi.submitAnswer(session.session_id, userMessage)
-        
-        if (response.success && response.data) {
-          setSession(response.data)
-          
-          if (response.data.current_question) {
-            setMessages((prev) => [
-              ...prev,
-              {
-                role: 'assistant',
-                content: response.data.current_question || '',
-                timestamp: new Date(),
-              },
-            ])
-          }
+        await interviewApi.submitAnswerStream(
+          session.session_id,
+          (data: SSEMessage) => {
+            if (data.type === 'start') {
+              // Update the placeholder message
+              setMessages((prev) => {
+                const newMessages = [...prev]
+                const lastIndex = newMessages.length - 1
+                if (lastIndex >= 0 && newMessages[lastIndex].role === 'assistant') {
+                  newMessages[lastIndex] = {
+                    ...newMessages[lastIndex],
+                    content: data.message || '正在处理...',
+                  }
+                }
+                return newMessages
+              })
+            } else if (data.type === 'processing') {
+              // Update with processing message
+              setMessages((prev) => {
+                const newMessages = [...prev]
+                const lastIndex = newMessages.length - 1
+                if (lastIndex >= 0 && newMessages[lastIndex].role === 'assistant') {
+                  newMessages[lastIndex] = {
+                    ...newMessages[lastIndex],
+                    content: data.message || '分析回答中...',
+                  }
+                }
+                return newMessages
+              })
+            } else if (data.type === 'response') {
+              // Update session and messages
+              if (data.current_question) {
+                setMessages((prev) => {
+                  const newMessages = [...prev]
+                  const lastIndex = newMessages.length - 1
+                  if (lastIndex >= 0 && newMessages[lastIndex].role === 'assistant') {
+                    newMessages[lastIndex] = {
+                      ...newMessages[lastIndex],
+                      content: data.current_question || '',
+                    }
+                  }
+                  return newMessages
+                })
+              }
 
-          if (response.data.is_finished) {
-            // Get report
-            const reportResponse = await interviewApi.getReport(session.session_id)
-            if (reportResponse.success && reportResponse.data) {
-              setReport(reportResponse.data)
-              setStage('report')
+              setSession({
+                session_id: data.session_id || session.session_id,
+                job_role: session.job_role,
+                tech_stack: session.tech_stack,
+                status: data.is_finished ? 'completed' : 'in_progress',
+                current_question: data.current_question,
+                question_number: data.question_number || 0,
+                total_questions: data.total_questions || 5,
+                is_finished: data.is_finished || false,
+              })
+
+              if (data.is_finished && data.report) {
+                setReport(data.report)
+                setStage('report')
+              }
+            } else if (data.type === 'error') {
+              message.error(data.message || '发生错误')
+              // Remove the placeholder message
+              setMessages((prev) => prev.slice(0, -1))
             }
+          },
+          userMessage,
+          undefined,
+          (error: Error) => {
+            message.error(`发送失败: ${error.message}`)
+            // Remove the placeholder message
+            setMessages((prev) => prev.slice(0, -1))
+            setLoading(false)
           }
-        }
+        )
       } catch (error) {
         message.error(`发送失败: ${(error as Error).message}`)
+        // Remove the placeholder message
+        setMessages((prev) => prev.slice(0, -1))
       } finally {
         setLoading(false)
       }
@@ -387,36 +459,51 @@ function InterviewSimulatorPage() {
                 <List
                   itemLayout="horizontal"
                   dataSource={messages}
-                  renderItem={(msg) => (
-                    <List.Item
-                      style={{
-                        borderBottom: 'none',
-                        padding: '12px 0',
-                      }}
-                    >
-                      <List.Item.Meta
-                        avatar={
-                          <Avatar
-                            icon={msg.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
-                            style={{
-                              backgroundColor: msg.role === 'user' ? '#6366f1' : '#8b5cf6',
-                            }}
-                          />
-                        }
-                        title={
-                          <Text style={{ color: 'var(--color-text-muted)', fontSize: '12px' }}>
-                            {msg.role === 'user' ? '你' : 'AI 面试官'} ·{' '}
-                            {msg.timestamp.toLocaleTimeString()}
-                          </Text>
-                        }
-                        description={
-                          <div style={{ color: 'var(--color-text-primary)', marginTop: '4px' }}>
-                            {msg.content}
-                          </div>
-                        }
-                      />
-                    </List.Item>
-                  )}
+                  renderItem={(msg) => {
+                    const isLoading = msg.role === 'assistant' && 
+                      (msg.content === '正在思考中...' || 
+                       msg.content === '正在处理...' || 
+                       msg.content === '分析回答中...' ||
+                       msg.content.includes('正在'))
+                      
+                    return (
+                      <List.Item
+                        style={{
+                          borderBottom: 'none',
+                          padding: '12px 0',
+                        }}
+                      >
+                        <List.Item.Meta
+                          avatar={
+                            <Avatar
+                              icon={msg.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
+                              style={{
+                                backgroundColor: msg.role === 'user' ? '#6366f1' : '#8b5cf6',
+                              }}
+                            />
+                          }
+                          title={
+                            <Text style={{ color: 'var(--color-text-muted)', fontSize: '12px' }}>
+                              {msg.role === 'user' ? '你' : 'AI 面试官'} ·{' '}
+                              {msg.timestamp.toLocaleTimeString()}
+                            </Text>
+                          }
+                          description={
+                            <div style={{ color: 'var(--color-text-primary)', marginTop: '4px' }}>
+                              {isLoading ? (
+                                <Space>
+                                  <Spin indicator={<LoadingOutlined style={{ fontSize: 16 }} spin />} />
+                                  <span>{msg.content}</span>
+                                </Space>
+                              ) : (
+                                msg.content
+                              )}
+                            </div>
+                          }
+                        />
+                      </List.Item>
+                    )
+                  }}
                 />
                 <div ref={messagesEndRef} />
               </div>

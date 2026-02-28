@@ -103,7 +103,7 @@ export const interviewApi = {
     return response.data
   },
 
-  // Submit answer (REST API)
+  // Submit answer (REST API - non-streaming)
   submitAnswer: async (
     sessionId: string,
     textAnswer?: string,
@@ -115,6 +115,70 @@ export const interviewApi = {
     
     const response = await api.post(`/interview/${sessionId}/answer?${params}`)
     return response.data
+  },
+
+  // Submit answer with SSE streaming (using fetch for POST support)
+  submitAnswerStream: async (
+    sessionId: string,
+    onMessage: (data: SSEMessage) => void,
+    textAnswer?: string,
+    audioBase64?: string,
+    onError?: (error: Error) => void
+  ): Promise<void> => {
+    const params = new URLSearchParams()
+    if (textAnswer) params.append('text_answer', textAnswer)
+    if (audioBase64) params.append('audio_base64', audioBase64)
+    
+    const url = `/api/interview/${sessionId}/answer/stream?${params}`
+    
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Accept': 'text/event-stream',
+        },
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No response body')
+      }
+      
+      const decoder = new TextDecoder()
+      let buffer = ''
+      
+      while (true) {
+        const { done, value } = await reader.read()
+        
+        if (done) break
+        
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6)) as SSEMessage
+              onMessage(data)
+              
+              if (data.type === 'done' || data.type === 'error') {
+                return
+              }
+            } catch (e) {
+              console.error('Failed to parse SSE message:', e)
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('SSE error:', error)
+      onError?.(error as Error)
+    }
   },
 
   // Get interview status
@@ -150,6 +214,20 @@ export const interviewApi = {
     const host = window.location.host
     return new WebSocket(`${protocol}//${host}/api/interview/ws/${sessionId}`)
   },
+}
+
+// SSE Message Types
+export interface SSEMessage {
+  type: 'start' | 'processing' | 'response' | 'done' | 'error'
+  message?: string
+  session_id?: string
+  is_finished?: boolean
+  current_question?: string
+  question_number?: number
+  total_questions?: number
+  audio_base64?: string
+  transcript?: string
+  report?: InterviewReport
 }
 
 export default api

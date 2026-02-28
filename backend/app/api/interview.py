@@ -1,15 +1,16 @@
 """
 Interview API - 面试模拟接口
 
-提供面试模拟功能，包括 WebSocket 实时语音交互。
+提供面试模拟功能，包括 WebSocket 实时语音交互和 SSE 流式返回。
 """
 
 import json
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -127,6 +128,127 @@ async def start_interview(
         )
 
 
+@router.post("/{session_id}/answer/stream")
+async def submit_answer_stream(
+    session_id: str,
+    text_answer: Optional[str] = None,
+    audio_base64: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    提交面试回答（SSE 流式返回）
+    
+    支持文本或音频输入，返回 SSE 流式响应。
+    """
+    logger.info(f"提交面试回答（流式），会话 ID: {session_id}")
+    
+    async def event_generator() -> AsyncGenerator[str, None]:
+        try:
+            # 获取会话状态
+            state = active_sessions.get(session_id)
+            
+            if not state:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Session not found'}, ensure_ascii=False)}\n\n"
+                return
+            
+            if not text_answer and not audio_base64:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Answer is required'}, ensure_ascii=False)}\n\n"
+                return
+            
+            # 发送开始事件
+            yield f"data: {json.dumps({'type': 'start', 'message': 'Processing your answer...'}, ensure_ascii=False)}\n\n"
+            
+            # 创建智能体
+            agent = InterviewAgent()
+            
+            # 发送处理中事件
+            yield f"data: {json.dumps({'type': 'processing', 'message': 'Analyzing your response...'}, ensure_ascii=False)}\n\n"
+            
+            # 处理回答
+            logger.info("处理面试回答")
+            new_state = await agent.process_answer(
+                state=state,
+                audio_input=audio_base64,
+                text_input=text_answer,
+            )
+            logger.debug("回答处理完成")
+            
+            # 更新会话状态
+            active_sessions[session_id] = new_state
+            
+            # 更新数据库记录
+            result = await db.execute(
+                select(InterviewRecord).where(InterviewRecord.session_id == session_id)
+            )
+            record = result.scalar_one_or_none()
+            
+            if record:
+                record.conversation_history = json.dumps(
+                    new_state.get("conversation_history", []),
+                    ensure_ascii=False,
+                )
+                record.question_count = new_state.get("question_count", 0)
+                
+                if new_state.get("is_finished"):
+                    record.status = InterviewStatus.COMPLETED
+                    record.ended_at = datetime.utcnow()
+                    record.total_score = new_state.get("total_score")
+                    
+                    report = new_state.get("report", {})
+                    record.strengths = json.dumps(
+                        report.get("strengths", []),
+                        ensure_ascii=False,
+                    )
+                    record.weaknesses = json.dumps(
+                        report.get("weaknesses", []),
+                        ensure_ascii=False,
+                    )
+                    record.suggestions = json.dumps(
+                        report.get("suggestions", []),
+                        ensure_ascii=False,
+                    )
+                    record.detailed_report = report.get("detailed_report", "")
+                    logger.info(f"面试完成，会话 ID: {session_id}")
+                
+                await db.commit()
+            
+            # 发送结果事件
+            response_data = {
+                "type": "response",
+                "session_id": session_id,
+                "is_finished": new_state.get("is_finished", False),
+                "current_question": new_state.get("current_question"),
+                "question_number": new_state.get("question_count", 0),
+                "total_questions": new_state.get("max_questions", 5),
+                "audio_base64": new_state.get("audio_output"),
+                "transcript": new_state.get("current_answer"),
+            }
+            
+            if new_state.get("is_finished"):
+                response_data["report"] = new_state.get("report")
+            
+            yield f"data: {json.dumps(response_data, ensure_ascii=False)}\n\n"
+            
+            # 发送完成事件
+            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+            
+            logger.info(f"回答处理成功，会话 ID: {session_id}")
+        
+        except Exception as e:
+            logger.error(f"处理回答失败: {str(e)}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.post("/{session_id}/answer", response_model=SuccessResponse)
 async def submit_answer(
     session_id: str,
@@ -135,9 +257,9 @@ async def submit_answer(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    提交面试回答（REST API 方式）
+    提交面试回答（REST API 方式 - 非流式）
     
-    支持文本或音频输入。
+    支持文本或音频输入。建议使用 /answer/stream 接口获得更好的实时体验。
     """
     logger.info(f"提交面试回答，会话 ID: {session_id}")
     # 获取会话状态

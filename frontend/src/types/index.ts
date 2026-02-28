@@ -166,3 +166,18 @@ export interface WSTextMessage {
 export interface WSEndMessage {
   type: 'end'
 }
+
+// SSE Message Types
+
+export interface SSEMessage {
+  type: 'start' | 'processing' | 'response' | 'done' | 'error'
+  message?: string
+  session_id?: string
+  is_finished?: boolean
+  current_question?: string
+  question_number?: number
+  total_questions?: number
+  audio_base64?: string
+  transcript?: string
+  report?: InterviewReport
+}

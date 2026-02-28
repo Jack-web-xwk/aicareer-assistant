@@ -11,7 +11,7 @@ Interview Agent - 面试模拟智能体
 支持多种 LLM 提供商：OpenAI, DeepSeek, 智谱GLM, Ollama, Anthropic, Qwen
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -205,7 +205,7 @@ class InterviewAgent:
                 {
                     "role": "assistant",
                     "content": first_question,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "score": None,
                 }
             ]
@@ -250,7 +250,7 @@ class InterviewAgent:
             conversation_history.append({
                 "role": "user",
                 "content": transcript,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "score": None,
             })
             
@@ -272,8 +272,8 @@ class InterviewAgent:
         
         基于对话历史生成面试官的回复（反馈 + 下一个问题）。
         """
-        job_role = state["job_role"]
-        tech_stack = state["tech_stack"]
+        job_role = state.get("job_role", "未知岗位")
+        tech_stack = state.get("tech_stack", [])
         conversation_history = state.get("conversation_history", [])
         current_answer = state.get("current_answer", "")
         question_count = state.get("question_count", 1)
@@ -287,22 +287,18 @@ class InterviewAgent:
 
 当前是第 {question_count}/{max_questions} 个问题。
 
-请基于候选人的回答：
+请基于候选人的回答，以自然、专业的面试官口吻进行回复：
 1. 首先对回答进行简短的反馈（指出亮点或需要补充的地方）
-2. 给出这个回答的评分（0-100）
-3. {"然后宣布面试结束，感谢候选人" if is_last_question else "然后提出下一个技术问题"}
+2. 给出这个回答的评分（0-100分），请在回复中明确写出评分，例如"这个回答我可以给85分"
+3. {"然后宣布面试结束，感谢候选人" if is_last_question else "然后自然地提出下一个技术问题"}
 
-请用 JSON 格式回复：
-{{
-    "feedback": "对回答的反馈",
-    "score": 85,
-    "next_content": "{"感谢参与面试的结束语" if is_last_question else "下一个技术问题"}",
-    "is_last": {str(is_last_question).lower()}
-}}"""
+请用自然流畅的中文回复，保持专业友好的态度，就像真实的面试对话一样。
+{"这是最后一个问题，请给出总结性反馈并结束面试。" if is_last_question else "请根据候选人的回答情况，提出一个相关的技术问题。"}"""
 
         # 构建对话上下文
         messages = [SystemMessage(content=system_prompt)]
         
+        # 添加对话历史，保持自然的对话格式
         for msg in conversation_history:
             if msg["role"] == "assistant":
                 messages.append(SystemMessage(content=f"面试官: {msg['content']}"))
@@ -311,32 +307,60 @@ class InterviewAgent:
         
         try:
             response = await self.llm.ainvoke(messages)
+            full_response = response.content.strip()
             
-            import json
-            content = response.content
-            if "```json" in content:
-                json_str = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                json_str = content.split("```")[1].split("```")[0].strip()
+            # 从回复中提取评分（使用正则表达式查找0-100之间的数字）
+            import re
+            score_match = re.search(r'(\d{1,3})\s*分', full_response)
+            if not score_match:
+                # 尝试其他格式：如"给85分"、"评分85"、"85分"
+                score_match = re.search(r'(\d{1,3})(?=\s*分)', full_response)
+            if not score_match:
+                score_match = re.search(r'评分\s*[:：]?\s*(\d{1,3})', full_response)
+            if not score_match:
+                score_match = re.search(r'(\d{1,3})\s*/\s*100', full_response)
+            
+            score = 0
+            if score_match:
+                try:
+                    score = int(score_match.group(1))
+                    # 确保分数在合理范围内
+                    if score < 0:
+                        score = 0
+                    elif score > 100:
+                        score = 100
+                except ValueError:
+                    score = 0
             else:
-                json_str = content.strip()
+                # 如果没有找到明确评分，根据回复长度和质量估算一个分数
+                if len(full_response) > 100 and "不错" in full_response or "很好" in full_response:
+                    score = 80
+                elif len(full_response) > 50:
+                    score = 70
+                else:
+                    score = 60
             
-            result = json.loads(json_str)
+            # 提取反馈部分（假设评分前的部分是反馈）
+            feedback = full_response
+            if score_match:
+                # 将评分部分从反馈中移除，避免重复
+                feedback = feedback.replace(score_match.group(0), '').strip()
             
-            feedback = result.get("feedback", "")
-            score = result.get("score", 0)
-            next_content = result.get("next_content", "")
-            is_last = result.get("is_last", is_last_question)
-            
-            # 组合完整回复
-            full_response = f"{feedback}\n\n{next_content}"
+            # 对于最后一个问题，next_content应该是结束语
+            if is_last_question:
+                next_content = "面试结束，感谢您的参与！"
+                is_last = True
+            else:
+                # 下一个问题就是完整的回复（包含反馈和问题）
+                next_content = full_response
+                is_last = False
             
             # 更新对话历史
             conversation_history = list(state.get("conversation_history", []))
             conversation_history.append({
                 "role": "assistant",
                 "content": full_response,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "score": None,
             })
             
@@ -347,7 +371,7 @@ class InterviewAgent:
                 "question": state.get("current_question", ""),
                 "answer": current_answer,
                 "score": score,
-                "feedback": feedback,
+                "feedback": feedback[:500] if len(feedback) > 500 else feedback,  # 截断过长的反馈
             })
             
             return {
@@ -435,8 +459,8 @@ class InterviewAgent:
         
         综合评估面试表现，生成详细报告。
         """
-        job_role = state["job_role"]
-        tech_stack = state["tech_stack"]
+        job_role = state.get("job_role", "未知岗位")
+        tech_stack = state.get("tech_stack", [])
         scores = state.get("scores", [])
         conversation_history = state.get("conversation_history", [])
         
@@ -586,8 +610,27 @@ class InterviewAgent:
         Returns:
             更新后的面试状态
         """
-        # 更新状态
+        # 确保状态包含所有必需字段
         state = dict(state)
+        
+        # 设置默认值，防止字段丢失
+        if "job_role" not in state:
+            state["job_role"] = state.get("job_role", "未知岗位")
+        if "tech_stack" not in state:
+            state["tech_stack"] = state.get("tech_stack", [])
+        if "difficulty_level" not in state:
+            state["difficulty_level"] = state.get("difficulty_level", "medium")
+        if "max_questions" not in state:
+            state["max_questions"] = state.get("max_questions", 5)
+        if "conversation_history" not in state:
+            state["conversation_history"] = []
+        if "scores" not in state:
+            state["scores"] = []
+        if "question_count" not in state:
+            state["question_count"] = 0
+        if "is_finished" not in state:
+            state["is_finished"] = False
+        
         state["audio_input"] = audio_input
         state["current_step"] = "process_answer"
         
@@ -598,7 +641,7 @@ class InterviewAgent:
             conversation_history.append({
                 "role": "user",
                 "content": text_input,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "score": None,
             })
             state["conversation_history"] = conversation_history
