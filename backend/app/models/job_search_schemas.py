@@ -15,6 +15,7 @@ class JobSource(str, Enum):
     ZHAOPIN = "zhaopin"
     YUPAO = "yupao"
     LINK = "link"  # 用户粘贴详情页 URL 爬取入库
+    SCREENSHOT = "screenshot"  # 用户上传截图，多模态模型抽取后入库
 
 
 class MatchMode(str, Enum):

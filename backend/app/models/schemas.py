@@ -88,11 +88,24 @@ class JobRequirements(BaseModel):
     industry: Optional[str] = None
     company_scale: Optional[str] = None
     financing_stage: Optional[str] = None
-    responsibilities: List[str] = []
-    required_skills: List[str] = []
-    preferred_skills: List[str] = []
+    responsibilities: List[str] = Field(default_factory=list, description="岗位职责要点")
+    qualifications: List[str] = Field(
+        default_factory=list,
+        description="任职要求（与职责区分；图中「任职要求」段落拆条）",
+    )
+    required_skills: List[str] = Field(default_factory=list)
+    preferred_skills: List[str] = Field(default_factory=list)
+    tech_stack_tags: List[str] = Field(
+        default_factory=list,
+        description="页面技能/技术标签（如 Boss 职位旁的标签云）",
+    )
+    benefits: List[str] = Field(default_factory=list, description="福利标签，如五险一金、下午茶等")
     experience_years: Optional[str] = None
     education_requirement: Optional[str] = None
+    work_address: Optional[str] = Field(None, description="详细办公地址（若图中有）")
+    work_schedule: Optional[str] = Field(None, description="工作时间、双休等")
+    recruiter_name: Optional[str] = None
+    recruiter_title: Optional[str] = None
 
 
 class MatchAnalysis(BaseModel):
@@ -103,6 +116,23 @@ class MatchAnalysis(BaseModel):
     strengths: List[str] = []
     areas_to_improve: List[str] = []
     suggestions: List[str] = []
+
+
+class StudyQaItem(BaseModel):
+    """简历优化任务衍生的学习 / 面试准备问答项"""
+
+    topic: str = Field(..., description="主题归类，如「岗位匹配」「技能补缺」")
+    question: str = Field(..., description="问题")
+    answer_hint: str = Field(
+        ...,
+        description="答题要点或思路提示（非标准答案，仅供自学）",
+    )
+
+
+class StudyQaResponseData(BaseModel):
+    """POST /resume/{id}/study-qa 返回的 data 结构"""
+
+    items: List[StudyQaItem] = Field(default_factory=list)
 
 
 class ResumeResponse(BaseModel):

@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.database import create_tables, ensure_sqlite_schema
+from app.services.resume_optimization_job import recover_resume_optimizations_on_startup
 from app.core.exception_handlers import register_exception_handlers
 from app.api import router as api_router
 from app.utils.logger import get_logger
@@ -44,6 +45,8 @@ async def lifespan(app: FastAPI):
     data_dir = Path("./data")
     data_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"数据目录创建完成: {data_dir}")
+    
+    await recover_resume_optimizations_on_startup()
     
     logger.info(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} started!")
     logger.info(f"📚 API Docs: http://localhost:8000/docs")

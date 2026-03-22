@@ -6,7 +6,7 @@ import asyncio
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,8 @@ from app.models.schemas import JobRequirements, SuccessResponse
 from app.models.user import User
 from app.services.job_search.aggregator import aggregate_jobs
 from app.services.job_search.cache import cache_key, get_cached, set_cached
+from app.services.job_screenshot_vision import extract_job_requirements_from_image
+from app.services.target_job_context import new_screenshot_job_url
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -56,8 +58,12 @@ def _saved_job_to_record(row: SavedJob) -> SavedJobRecord:
     )
 
 
-def _job_requirements_to_unified(job: JobRequirements, url: str) -> UnifiedJobItem:
-    """爬取结果 -> 与聚合列表一致的结构，便于写入 saved_jobs。"""
+def _job_requirements_to_unified(
+    job: JobRequirements,
+    url: str,
+    source: JobSource = JobSource.LINK,
+) -> UnifiedJobItem:
+    """结构化岗位 -> 与聚合列表一致的结构，便于写入 saved_jobs。"""
     return UnifiedJobItem(
         title=(job.title or "（无标题）").strip() or "（无标题）",
         company_name=(job.company or "").strip(),
@@ -66,7 +72,7 @@ def _job_requirements_to_unified(job: JobRequirements, url: str) -> UnifiedJobIt
         published_at=None,
         experience_text=(job.experience_years or "").strip(),
         education_text=(job.education_requirement or "").strip(),
-        source=JobSource.LINK,
+        source=source,
         detail_url=url.strip()[:1200],
         raw_snippet=json.dumps(job.model_dump(), ensure_ascii=False),
     )
@@ -245,6 +251,86 @@ async def scrape_job_url_and_save(
             "saved": _saved_job_to_record(row).model_dump(mode="json"),
             "job_snapshot": job_info.model_dump(),
         },
+    )
+
+
+_ALLOWED_IMAGE_CT = frozenset(
+    {"image/jpeg", "image/png", "image/webp", "image/gif", "image/jpg"}
+)
+
+
+@router.post("/from-screenshot", response_model=SuccessResponse)
+async def extract_job_from_screenshot_and_save(
+    file: UploadFile = File(..., description="岗位详情截图（PNG/JPEG/WebP 等）"),
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(check_job_search_rate_limit),
+) -> SuccessResponse:
+    """
+    上传招聘详情截图，由多模态大模型抽取结构化岗位信息并写入 saved_jobs。
+    返回的 detail_url 为内部伪链接 `job:screenshot:<uuid>`，可用于简历优化页「目标岗位」。
+    """
+    ct = (file.content_type or "").split(";")[0].strip().lower()
+    if ct == "image/jpg":
+        ct = "image/jpeg"
+    if ct not in _ALLOWED_IMAGE_CT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的图片类型: {file.content_type}，请上传 PNG / JPEG / WebP",
+        )
+
+    max_bytes = max(1, int(settings.JOB_SCREENSHOT_MAX_IMAGE_MB)) * 1024 * 1024
+    raw = await file.read()
+    if len(raw) > max_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"图片过大，最大 {settings.JOB_SCREENSHOT_MAX_IMAGE_MB}MB",
+        )
+    if len(raw) < 256:
+        raise HTTPException(status_code=400, detail="图片过小或内容为空")
+
+    mime = ct if ct != "image/jpg" else "image/jpeg"
+    try:
+        job_info = await extract_job_requirements_from_image(raw, mime)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("截图岗位识别失败")
+        raise HTTPException(status_code=502, detail=f"识别失败: {e!s}") from e
+
+    detail_url = new_screenshot_job_url()
+    item = _job_requirements_to_unified(job_info, detail_url, source=JobSource.SCREENSHOT)
+    user = await get_or_create_user(db)
+    try:
+        row = await _persist_unified_saved_job(db, user, item)
+    except Exception as e:
+        logger.exception("from-screenshot 写入 saved_jobs 失败")
+        raise HTTPException(status_code=500, detail=f"保存失败: {e!s}") from e
+
+    return SuccessResponse(
+        message="screenshot_extracted_and_saved",
+        data={
+            "saved": _saved_job_to_record(row).model_dump(mode="json"),
+            "job_snapshot": job_info.model_dump(),
+        },
+    )
+
+
+@router.get("/saved/{job_id}", response_model=SuccessResponse)
+async def get_saved_job(
+    job_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> SuccessResponse:
+    """单条已保存职位（含 raw_snippet 中的完整结构化 JSON）。"""
+    user = await get_or_create_user(db)
+    result = await db.execute(
+        select(SavedJob).where(SavedJob.id == job_id, SavedJob.user_id == user.id)
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Saved job not found")
+    return SuccessResponse(
+        message="ok",
+        data=_saved_job_to_record(row).model_dump(mode="json"),
     )
 
 

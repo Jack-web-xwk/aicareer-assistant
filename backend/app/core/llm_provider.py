@@ -108,6 +108,8 @@ PROVIDER_MODELS: Dict[LLMProvider, list] = {
         "qwen-long",
         "qwen-vl-plus",        # 视觉模型
         "qwen-vl-max",
+        "qwen-image-edit-plus",
+        "qwen-image-edit-plus-2025-10-30",
         "qwen-coder-turbo",    # 代码模型
     ],
     LLMProvider.BAILIAN: [
@@ -117,6 +119,8 @@ PROVIDER_MODELS: Dict[LLMProvider, list] = {
         "qwen-long",
         "qwen-vl-plus",
         "qwen-vl-max",
+        "qwen-image-edit-plus",
+        "qwen-image-edit-plus-2025-10-30",
         "qwen-coder-turbo",
     ],
 }
