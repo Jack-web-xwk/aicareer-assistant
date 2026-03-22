@@ -8,6 +8,7 @@ LLM Provider - 多模型支持
 - Ollama (本地模型)
 - Anthropic Claude (claude-3-opus, claude-3-sonnet)
 - 通义千问 Qwen (qwen-turbo, qwen-plus, qwen-max)
+- 阿里百炼 Bailian (Qwen 系列模型)
 """
 
 from enum import Enum
@@ -27,6 +28,7 @@ class LLMProvider(str, Enum):
     OLLAMA = "ollama"         # 本地模型
     ANTHROPIC = "anthropic"   # Claude
     QWEN = "qwen"             # 通义千问
+    BAILIAN = "bailian"       # 阿里百炼
 
 
 # 各提供商的 API Base URL
@@ -37,6 +39,7 @@ PROVIDER_BASE_URLS: Dict[LLMProvider, str] = {
     LLMProvider.OLLAMA: "http://localhost:11434/v1",
     LLMProvider.ANTHROPIC: "https://api.anthropic.com/v1",
     LLMProvider.QWEN: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    LLMProvider.BAILIAN: "https://dashscope.aliyuncs.com/compatible-mode/v1",
 }
 
 
@@ -48,6 +51,7 @@ PROVIDER_DEFAULT_MODELS: Dict[LLMProvider, str] = {
     LLMProvider.OLLAMA: "llama3.2",
     LLMProvider.ANTHROPIC: "claude-3-5-sonnet-20241022",
     LLMProvider.QWEN: "qwen-turbo",
+    LLMProvider.BAILIAN: "qwen-plus",
 }
 
 
@@ -106,6 +110,15 @@ PROVIDER_MODELS: Dict[LLMProvider, list] = {
         "qwen-vl-max",
         "qwen-coder-turbo",    # 代码模型
     ],
+    LLMProvider.BAILIAN: [
+        "qwen-turbo",
+        "qwen-plus",
+        "qwen-max",
+        "qwen-long",
+        "qwen-vl-plus",
+        "qwen-vl-max",
+        "qwen-coder-turbo",
+    ],
 }
 
 
@@ -132,18 +145,34 @@ class LLMFactory:
     """
     
     @staticmethod
+    def _clean_api_key(raw_key: Optional[str]) -> str:
+        """清洗 API Key，避免因引号/空白导致鉴权失败。"""
+        if not raw_key:
+            return ""
+        cleaned = raw_key.strip().strip('"').strip("'").strip()
+        # 常见占位值视为未配置
+        if cleaned.startswith("your-") or "your-" in cleaned.lower():
+            return ""
+        return cleaned
+
+    @staticmethod
     def get_api_key(provider: LLMProvider) -> str:
         """获取指定提供商的 API Key"""
         key_mapping = {
-            LLMProvider.OPENAI: settings.OPENAI_API_KEY,
-            LLMProvider.DEEPSEEK: settings.DEEPSEEK_API_KEY,
-            LLMProvider.ZHIPU: settings.ZHIPU_API_KEY,
-            LLMProvider.OLLAMA: settings.OLLAMA_API_KEY,
-            LLMProvider.ANTHROPIC: settings.ANTHROPIC_API_KEY,
-            LLMProvider.QWEN: settings.QWEN_API_KEY,
+            LLMProvider.OPENAI: LLMFactory._clean_api_key(settings.OPENAI_API_KEY),
+            LLMProvider.DEEPSEEK: LLMFactory._clean_api_key(settings.DEEPSEEK_API_KEY),
+            LLMProvider.ZHIPU: LLMFactory._clean_api_key(settings.ZHIPU_API_KEY),
+            LLMProvider.OLLAMA: LLMFactory._clean_api_key(settings.OLLAMA_API_KEY),
+            LLMProvider.ANTHROPIC: LLMFactory._clean_api_key(settings.ANTHROPIC_API_KEY),
+            LLMProvider.QWEN: LLMFactory._clean_api_key(settings.QWEN_API_KEY),
+            # Bailian 与 Qwen 都走 DashScope 兼容接口，允许互为兜底
+            LLMProvider.BAILIAN: (
+                LLMFactory._clean_api_key(settings.BAILIAN_API_KEY)
+                or LLMFactory._clean_api_key(settings.QWEN_API_KEY)
+            ),
         }
-        # 默认提供deepseek
-        return key_mapping.get(provider, settings.DEEPSEEK_API_KEY)
+        # 默认提供 deepseek
+        return key_mapping.get(provider, LLMFactory._clean_api_key(settings.DEEPSEEK_API_KEY))
     
     @staticmethod
     def get_base_url(provider: LLMProvider, custom_url: Optional[str] = None) -> str:
@@ -154,6 +183,9 @@ class LLMFactory:
         # Ollama 使用配置中的 URL
         if provider == LLMProvider.OLLAMA:
             return settings.OLLAMA_BASE_URL
+        # Bailian 使用配置中的 URL
+        if provider == LLMProvider.BAILIAN:
+            return settings.BAILIAN_BASE_URL
         
         return PROVIDER_BASE_URLS.get(provider, PROVIDER_BASE_URLS[LLMProvider.DEEPSEEK])
     
@@ -218,6 +250,7 @@ class LLMFactory:
             "temperature": temperature,
             **kwargs,
         }
+        llm_params.setdefault("request_timeout", settings.LLM_REQUEST_TIMEOUT)
         
         if final_api_key:
             llm_params["api_key"] = final_api_key
