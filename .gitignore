@@ -74,6 +74,14 @@ dist-ssr/
 
 .vscode/
 .idea/
+
+# Claude / Cursor (local agent state, nested rules; keep root .cursor/skills/ if tracked)
+.claude/
+backend/.cursor/
+frontend/.cursor/
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**/*
 *.swp
 *.swo
 *.sublime-workspace
