@@ -94,7 +94,7 @@ class ResumeParser:
         except FileProcessingException:
             raise
         except Exception as e:
-            logger.error(f"解析简历失败: {str(e)}")
+            logger.error(f"解析简历失败: {str(e)}", exc_info=True)
             raise FileProcessingException(
                 f"Failed to parse resume: {str(e)}",
                 filename=str(file_path) if file_path else None,

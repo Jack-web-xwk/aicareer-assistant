@@ -41,7 +41,10 @@ class AudioProcessor:
         if not self.api_key:
             raise ValueError("OpenAI API Key is required")
         
-        self.client = OpenAI(api_key=self.api_key)
+        self.client = OpenAI(
+            api_key=self.api_key,
+            timeout=float(settings.LLM_REQUEST_TIMEOUT),
+        )
         self.tts_voice = settings.TTS_VOICE
     
     def transcribe(
