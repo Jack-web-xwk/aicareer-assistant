@@ -1,4 +1,5 @@
-import { Card, Row, Col, Typography, Button, Space } from 'antd'
+import type { ReactNode } from 'react'
+import { Card, Row, Col, Typography, Button, Space, Divider } from 'antd'
 import {
   FileTextOutlined,
   AudioOutlined,
@@ -6,6 +7,10 @@ import {
   ThunderboltOutlined,
   SafetyOutlined,
   ApiOutlined,
+  SearchOutlined,
+  LinkOutlined,
+  FolderOpenOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 
@@ -18,7 +23,7 @@ function HomePage() {
     {
       icon: <FileTextOutlined style={{ fontSize: '32px', color: '#6366f1' }} />,
       title: '简历智能优化',
-      description: '上传简历和目标岗位链接，AI 自动分析匹配度并生成优化后的简历，使用 STAR 法则突出亮点。',
+      description: '上传或选用已有简历 + 目标岗位链接，LangGraph 工作流分析匹配度并流式生成优化简历。',
       action: () => navigate('/resume'),
       buttonText: '开始优化',
     },
@@ -28,6 +33,43 @@ function HomePage() {
       description: '选择目标岗位和技术栈，与 AI 面试官进行语音对话，获得实时反馈和评估报告。',
       action: () => navigate('/interview'),
       buttonText: '开始面试',
+    },
+  ]
+
+  const moreFeatures: {
+    icon: ReactNode
+    title: string
+    description: string
+    action: () => void
+    buttonText: string
+  }[] = [
+    {
+      icon: <SearchOutlined style={{ fontSize: '28px', color: '#22d3ee' }} />,
+      title: '多源职位搜索',
+      description: 'Boss / 智联 / 鱼泡等聚合搜索，支持筛选、排序与分页，结果可保存。',
+      action: () => navigate('/jobs'),
+      buttonText: '去搜索',
+    },
+    {
+      icon: <LinkOutlined style={{ fontSize: '28px', color: '#f472b6' }} />,
+      title: '目标岗位（链接爬取）',
+      description: '粘贴岗位详情页 URL，服务端爬取并持久化，用于简历优化或职位库。',
+      action: () => navigate('/target-jobs'),
+      buttonText: '粘贴链接',
+    },
+    {
+      icon: <FolderOpenOutlined style={{ fontSize: '28px', color: '#a78bfa' }} />,
+      title: '我的职位',
+      description: '查看已保存的职位记录（搜索收藏与链接爬取入库统一管理）。',
+      action: () => navigate('/jobs/saved'),
+      buttonText: '打开职位库',
+    },
+    {
+      icon: <HistoryOutlined style={{ fontSize: '28px', color: '#94a3b8' }} />,
+      title: '简历任务 / 历史',
+      description: '全部上传与优化任务、继续流式优化、解除卡住、下载结果；面试报告也在此查看。',
+      action: () => navigate('/resume/history'),
+      buttonText: '查看历史',
     },
   ]
 
@@ -123,6 +165,41 @@ function HomePage() {
                   onClick={feature.action}
                   style={{ width: '100%' }}
                 >
+                  {feature.buttonText}
+                </Button>
+              </Space>
+            </Card>
+          </Col>
+        ))}
+      </Row>
+
+      <Divider plain style={{ borderColor: 'var(--color-border)', margin: '8px 0 32px' }}>
+        <Text style={{ color: 'var(--color-text-muted)', fontSize: 13 }}>新增与扩展能力</Text>
+      </Divider>
+
+      <Row gutter={[24, 24]} style={{ marginBottom: '48px' }}>
+        {moreFeatures.map((feature, index) => (
+          <Col xs={24} sm={12} lg={6} key={index}>
+            <Card
+              hoverable
+              style={{
+                height: '100%',
+                background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.85) 0%, rgba(15, 23, 42, 0.9) 100%)',
+                border: '1px solid var(--color-border)',
+              }}
+              bodyStyle={{ padding: '24px' }}
+            >
+              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                {feature.icon}
+                <Title level={4} style={{ color: 'var(--color-text-primary)', margin: 0, fontSize: 17 }}>
+                  {feature.title}
+                </Title>
+                <Paragraph
+                  style={{ color: 'var(--color-text-secondary)', marginBottom: 8, minHeight: 72, fontSize: 13 }}
+                >
+                  {feature.description}
+                </Paragraph>
+                <Button type="default" block onClick={feature.action}>
                   {feature.buttonText}
                 </Button>
               </Space>
