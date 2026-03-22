@@ -1,16 +1,51 @@
 import axios, { AxiosInstance, AxiosError } from 'axios'
+
+/** 将 FastAPI / Starlette 的 detail（字符串、对象、校验错误数组）转为可读文案 */
+function formatAxiosErrorMessage(error: AxiosError): string {
+  if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+    return '请求超时，请确认后端已启动且网络正常；岗位爬取可能较慢，可稍后重试。'
+  }
+  const raw = error.response?.data
+  if (raw && typeof raw === 'object' && 'detail' in raw) {
+    const d = (raw as { detail: unknown }).detail
+    if (typeof d === 'string') return d
+    if (Array.isArray(d)) {
+      try {
+        return JSON.stringify(d)
+      } catch {
+        return '请求参数校验失败'
+      }
+    }
+    if (d && typeof d === 'object') {
+      try {
+        return JSON.stringify(d)
+      } catch {
+        return error.message
+      }
+    }
+  }
+  return error.message
+}
 import type {
   ApiResponse,
   ResumeInfo,
+  ResumeHistoryListItem,
+  InterviewHistoryListItem,
+  ResumeStreamMessage,
   InterviewSession,
   InterviewStartRequest,
   InterviewReport,
+  JobSearchQuery,
+  JobSearchResponse,
+  SavedJobRecord,
+  ResumeUploadListItem,
+  UnifiedJobItem,
 } from '../types'
 
 // Create axios instance
 const api: AxiosInstance = axios.create({
   baseURL: '/api',
-  timeout: 60000, // 60 seconds for AI operations
+  timeout: 180000, // 3 分钟：AI / 爬取等较慢操作
   headers: {
     'Content-Type': 'application/json',
   },
@@ -20,8 +55,11 @@ const api: AxiosInstance = axios.create({
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
-    const message = (error.response?.data as { detail?: string })?.detail || error.message
-    console.error('API Error:', message)
+    if (axios.isCancel(error) || error.code === 'ERR_CANCELED') {
+      return Promise.reject(error)
+    }
+    const message = formatAxiosErrorMessage(error)
+    console.error('API Error:', message, error.response?.status, error.response?.data)
     return Promise.reject(new Error(message))
   }
 )
@@ -63,18 +101,100 @@ export const resumeApi = {
     return response.data
   },
 
+  optimizeStream: async (
+    resumeId: number,
+    onMessage: (data: ResumeStreamMessage) => void,
+    targetJobUrl?: string,
+    onError?: (error: Error) => void
+  ): Promise<void> => {
+    const params = new URLSearchParams()
+    if (targetJobUrl) params.append('target_job_url', targetJobUrl)
+
+    const url = `/api/resume/optimize/${resumeId}/stream?${params}`
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Accept': 'text/event-stream',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No response body')
+      }
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split(/\r?\n/)
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data: ')) continue
+          try {
+            const data = JSON.parse(trimmed.slice(6)) as ResumeStreamMessage
+            onMessage(data)
+            if (data.type === 'done' || data.type === 'error') {
+              return
+            }
+          } catch (e) {
+            console.error('Failed to parse resume SSE message:', e)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Resume SSE error:', error)
+      onError?.(error as Error)
+    }
+  },
+
   // Get resume details
   get: async (resumeId: number): Promise<ApiResponse<ResumeInfo>> => {
     const response = await api.get(`/resume/${resumeId}`)
     return response.data
   },
 
-  // List resumes
+  // List resumes（全部上传记录）
   list: async (
     skip = 0,
     limit = 20
-  ): Promise<ApiResponse<{ resumes: ResumeInfo[]; total: number }>> => {
+  ): Promise<
+    ApiResponse<{
+      resumes: ResumeUploadListItem[]
+      total: number
+      skip: number
+      limit: number
+    }>
+  > => {
     const response = await api.get(`/resume?skip=${skip}&limit=${limit}`)
+    return response.data
+  },
+
+  /** 已优化成功的历史记录（按更新时间倒序） */
+  history: async (
+    skip = 0,
+    limit = 50
+  ): Promise<
+    ApiResponse<{
+      items: ResumeHistoryListItem[]
+      total: number
+      skip: number
+      limit: number
+    }>
+  > => {
+    const response = await api.get(`/resume/history?skip=${skip}&limit=${limit}`)
     return response.data
   },
 
@@ -89,6 +209,68 @@ export const resumeApi = {
   // Delete resume
   delete: async (resumeId: number): Promise<ApiResponse> => {
     const response = await api.delete(`/resume/${resumeId}`)
+    return response.data
+  },
+
+  /** 卡在「优化中」时恢复为「已解析」，便于重新发起 SSE 优化 */
+  unlockOptimization: async (
+    resumeId: number
+  ): Promise<ApiResponse<{ id: number; status: string }>> => {
+    const response = await api.post(`/resume/${resumeId}/unlock-optimization`)
+    return response.data
+  },
+}
+
+/** 职位搜索：传入 AbortSignal 可取消未完成的请求 */
+export const jobSearchApi = {
+  search: async (
+    body: JobSearchQuery,
+    options?: { signal?: AbortSignal }
+  ): Promise<ApiResponse<JobSearchResponse>> => {
+    const response = await api.post<ApiResponse<JobSearchResponse>>('/jobs/search', body, {
+      signal: options?.signal,
+    })
+    return response.data
+  },
+}
+
+/** 已保存职位（数据库持久化） */
+export const jobSavedApi = {
+  save: async (body: UnifiedJobItem): Promise<ApiResponse<SavedJobRecord>> => {
+    const response = await api.post<ApiResponse<SavedJobRecord>>('/jobs/saved', body)
+    return response.data
+  },
+  list: async (
+    skip = 0,
+    limit = 50
+  ): Promise<
+    ApiResponse<{
+      items: SavedJobRecord[]
+      total: number
+      skip: number
+      limit: number
+    }>
+  > => {
+    const response = await api.get(`/jobs/saved?skip=${skip}&limit=${limit}`)
+    return response.data
+  },
+  delete: async (jobId: number): Promise<ApiResponse<{ id: number }>> => {
+    const response = await api.delete(`/jobs/saved/${jobId}`)
+    return response.data
+  },
+}
+
+/** 粘贴岗位详情 URL → 服务端爬取并写入 saved_jobs */
+export const jobScrapeApi = {
+  scrapeAndSave: async (
+    url: string
+  ): Promise<
+    ApiResponse<{
+      saved: SavedJobRecord
+      job_snapshot: Record<string, unknown>
+    }>
+  > => {
+    const response = await api.post('/jobs/scrape-url', { url }, { timeout: 300000 })
     return response.data
   },
 }
@@ -205,6 +387,22 @@ export const interviewApi = {
     limit = 20
   ): Promise<ApiResponse<{ interviews: InterviewSession[]; total: number }>> => {
     const response = await api.get(`/interview?skip=${skip}&limit=${limit}`)
+    return response.data
+  },
+
+  /** 已完成的模拟面试历史（按结束时间倒序） */
+  history: async (
+    skip = 0,
+    limit = 50
+  ): Promise<
+    ApiResponse<{
+      items: InterviewHistoryListItem[]
+      total: number
+      skip: number
+      limit: number
+    }>
+  > => {
+    const response = await api.get(`/interview/history?skip=${skip}&limit=${limit}`)
     return response.data
   },
 

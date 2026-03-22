@@ -17,6 +17,24 @@ export interface ErrorResponse {
 
 // Resume Types
 
+/** 与后端 JobRequirements + source_url 一致，用于历史/详情展示 */
+export interface JobSnapshot {
+  title?: string
+  company?: string | null
+  salary?: string | null
+  location?: string | null
+  industry?: string | null
+  company_scale?: string | null
+  financing_stage?: string | null
+  responsibilities?: string[]
+  required_skills?: string[]
+  preferred_skills?: string[]
+  experience_years?: string | null
+  education_requirement?: string | null
+  source_url?: string
+  scrape_error?: string
+}
+
 export interface ResumeInfo {
   id: number
   original_filename: string
@@ -24,10 +42,13 @@ export interface ResumeInfo {
   status: ResumeStatus
   target_job_url?: string
   target_job_title?: string
+  job_description?: string | null
+  job_snapshot?: JobSnapshot | null
   original_text?: string
   extracted_info?: ExtractedResumeInfo
   match_analysis?: MatchAnalysis
   optimized_resume?: string
+  error_message?: string | null
   created_at: string
   updated_at: string
 }
@@ -91,6 +112,66 @@ export interface MatchAnalysis {
   suggestions: string[]
 }
 
+/** GET /resume/history 列表项（无完整正文） */
+export interface ResumeHistoryListItem {
+  id: number
+  original_filename: string
+  file_type: string
+  status: ResumeStatus
+  target_job_title?: string | null
+  target_job_url?: string | null
+  match_score?: number | null
+  preview?: string | null
+  job_snapshot?: JobSnapshot | null
+  error_message?: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** GET /interview/history 列表项（无完整报告正文） */
+export interface InterviewHistoryListItem {
+  session_id: string
+  job_role: string
+  tech_stack: string[]
+  total_score: number | null
+  duration_minutes: number | null
+  preview?: string | null
+  started_at: string
+  ended_at: string | null
+}
+
+/** LangGraph 图中节点 id，与后端 StateGraph 节点名一致 */
+export type ResumeOptimizerGraphNode =
+  | 'extract_resume_info'
+  | 'analyze_job_requirements'
+  | 'match_content'
+  | 'generate_optimized_resume'
+
+/** 单个 LangGraph 节点完成后推送的详情（SSE node_complete） */
+export interface ResumeNodeOutputPayload {
+  data?: Record<string, unknown>
+  thinking?: string | null
+  rawPreview?: string | null
+}
+
+export interface ResumeStreamMessage {
+  type: 'start' | 'progress' | 'token' | 'done' | 'error' | 'node_complete'
+  message?: string
+  step?: ResumeOptimizerGraphNode
+  /** 与 step 相同，显式标注 LangGraph 节点 */
+  node?: ResumeOptimizerGraphNode
+  delta?: string
+  optimized_resume?: string
+  extracted_info?: ExtractedResumeInfo
+  match_analysis?: MatchAnalysis
+  /** node_complete：该节点结构化输出 */
+  data?: Record<string, unknown>
+  /** node_complete：模型分析思路 / reasoning_notes / 厂商推理字段 */
+  thinking?: string | null
+  /** node_complete：模型原始输出片段（便于核对） */
+  raw_preview?: string | null
+}
+
 // Interview Types
 
 export interface InterviewSession {
@@ -129,6 +210,7 @@ export interface InterviewReport {
   detailed_report?: string
   duration_minutes?: number
   completed_at: string
+  conversation_history?: InterviewMessage[]
 }
 
 export interface InterviewMessage {
@@ -180,4 +262,72 @@ export interface SSEMessage {
   audio_base64?: string
   transcript?: string
   report?: InterviewReport
+}
+
+// Job search (multi-source aggregation)
+
+export type JobSource = 'boss' | 'zhaopin' | 'yupao' | 'link'
+
+export type JobMatchMode = 'fuzzy' | 'exact'
+
+export type JobSortBy = 'published_at' | 'salary'
+
+export type JobSortOrder = 'desc' | 'asc'
+
+export interface UnifiedJobItem {
+  title: string
+  company_name: string
+  salary_text: string
+  location: string
+  published_at?: string | null
+  experience_text: string
+  education_text: string
+  source: JobSource
+  detail_url: string
+  raw_snippet?: string | null
+}
+
+export interface JobSearchQuery {
+  keyword: string
+  company_keyword: string
+  match_mode: JobMatchMode
+  city?: string | null
+  salary_min?: number | null
+  salary_max?: number | null
+  experience?: string | null
+  sources: JobSource[]
+  sort_by: JobSortBy
+  sort_order: JobSortOrder
+  page: number
+  page_size: number
+}
+
+export interface JobSearchResponse {
+  items: UnifiedJobItem[]
+  total: number
+  page: number
+  page_size: number
+  sources_used: string[]
+  cached: boolean
+  warning?: string | null
+}
+
+/** 数据库中保存的职位（POST /jobs/saved 与 GET /jobs/saved） */
+export type SavedJobRecord = UnifiedJobItem & {
+  id: number
+  created_at: string
+  updated_at: string
+}
+
+/** GET /resume 上传记录列表项 */
+export interface ResumeUploadListItem {
+  id: number
+  original_filename: string
+  file_type: string
+  status: ResumeStatus
+  target_job_title?: string | null
+  target_job_url?: string | null
+  error_message?: string | null
+  created_at: string
+  updated_at: string
 }
