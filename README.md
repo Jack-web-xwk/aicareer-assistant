@@ -23,6 +23,38 @@
 - **限流**：每客户端 IP 每分钟最多 **10 次** 搜索请求，超出返回 `429` 与 `Retry-After`
 - **合规**：各站服务条款与反爬策略不同，本功能仅供学习/自用；请合理设置请求间隔并遵守 `robots.txt`
 
+## 📸 界面演示（简历智能优化）
+
+以下为「简历智能优化」流程与 LangGraph 可观测性示意。截图仅作文档说明，界面与数据以实际运行为准；资源目录：`docs/codebase/images/`。
+
+**路径与渲染**：图片使用相对本文件（仓库根目录 `README.md`）的路径 `docs/codebase/images/...`，与 **GitHub 仓库主页**解析方式一致，**推送到 GitHub 后表格内截图可正常显示**。部分编辑器自带的 Markdown Preview 对「表格 + 内嵌图片」支持不完整，若本地看不到图，可直接打开 `docs/codebase/images/` 下对应 PNG，或以 GitHub 网页为准。
+
+### 流程：上传 → 目标岗位 → 节点执行
+
+| 说明 | 截图 |
+| --- | --- |
+| **第一步**：上传或选择简历（PDF / Word） | <img src="docs/codebase/images/demo-resume-step1-upload.png" alt="第一步：上传简历" width="640" /> |
+| **第二步**：准备优化（目标岗位链接，可来自应用内搜索或粘贴招聘站链接） | <img src="docs/codebase/images/demo-resume-step2-target-job.png" alt="第二步：目标岗位链接" width="640" /> |
+| **LangGraph 节点与进度**（节点可点击「看输出」查看结构化结果与「分析思路」） | <img src="docs/codebase/images/demo-resume-langgraph-nodes.png" alt="LangGraph 节点与进度" width="640" /> |
+
+### LangGraph 节点与可观测性
+
+「简历智能优化」由 **LangGraph** 编排多条节点顺序执行；前端在节点时间线上展示进度，并支持点击 **「看输出」** 打开侧栏，查看该节点的 **分析思路 / 模型思考**、**模型原始输出片段** 与 **结构化数据**，便于理解各步在做什么、中间态如何传给下一步。
+
+| 截图文件 | 对应节点（后端名） | 说明 |
+| --- | --- | --- |
+| `demo-agent-node-extract-resume-info.png` | `extract_resume_info` | 从简历抽取联系信息、摘要、教育等结构化 JSON |
+| `demo-agent-node-analyze-job-requirements.png` | `analyze_job_requirements` | 从岗位描述抽取职责、必备技能等 |
+| `demo-agent-node-match-content.png` | `match_content` | 简历与岗位的匹配分、已匹配/缺失技能等 |
+| `demo-resume-step4-results.png` | （结果页） | 左侧匹配度与标签，右侧优化稿与复制/下载 |
+
+| 说明 | 截图 |
+| --- | --- |
+| **`extract_resume_info`**：侧栏展示思路、原始片段与结构化数据 | <img src="docs/codebase/images/demo-agent-node-extract-resume-info.png" alt="节点：提取简历信息" width="640" /> |
+| **`analyze_job_requirements`**：岗位需求结构化 | <img src="docs/codebase/images/demo-agent-node-analyze-job-requirements.png" alt="节点：分析岗位需求" width="640" /> |
+| **`match_content`**：匹配分与缺项技能（示例数据） | <img src="docs/codebase/images/demo-agent-node-match-content.png" alt="节点：内容匹配分析" width="640" /> |
+| **第四步「查看结果」**：匹配分析总览与优化后简历预览 | <img src="docs/codebase/images/demo-resume-step4-results.png" alt="结果页：匹配分析与优化简历" width="640" /> |
+
 ## 🛠️ 技术栈
 
 | 层级 | 技术 |
