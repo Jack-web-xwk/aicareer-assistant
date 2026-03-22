@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -121,7 +121,7 @@ async def start_interview(
         )
     
     except Exception as e:
-        logger.error(f"开始面试失败: {str(e)}")
+        logger.error(f"开始面试失败: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to start interview: {str(e)}",
@@ -235,7 +235,7 @@ async def submit_answer_stream(
             logger.info(f"回答处理成功，会话 ID: {session_id}")
         
         except Exception as e:
-            logger.error(f"处理回答失败: {str(e)}")
+            logger.error(f"处理回答失败: {str(e)}", exc_info=True)
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
     
     return StreamingResponse(
@@ -364,11 +364,77 @@ async def submit_answer(
         )
     
     except Exception as e:
-        logger.error(f"处理回答失败: {str(e)}")
+        logger.error(f"处理回答失败: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to process answer: {str(e)}",
         )
+
+
+@router.get("/history", response_model=SuccessResponse)
+async def list_interview_history(
+    skip: int = 0,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    历史结果：仅返回当前用户已完成的模拟面试（含评估报告），按结束时间倒序。
+    完整报告请用 GET /interview/{session_id}/report。
+    """
+    user = await get_or_create_user(db)
+
+    count_result = await db.execute(
+        select(func.count())
+        .select_from(InterviewRecord)
+        .where(
+            InterviewRecord.user_id == user.id,
+            InterviewRecord.status == InterviewStatus.COMPLETED,
+        )
+    )
+    total = int(count_result.scalar_one() or 0)
+
+    result = await db.execute(
+        select(InterviewRecord)
+        .where(
+            InterviewRecord.user_id == user.id,
+            InterviewRecord.status == InterviewStatus.COMPLETED,
+        )
+        .order_by(InterviewRecord.ended_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    rows = result.scalars().all()
+
+    items = []
+    for r in rows:
+        preview = ""
+        if r.detailed_report:
+            preview = (r.detailed_report or "")[:280].replace("\n", " ")
+            if len(r.detailed_report or "") > 280:
+                preview += "…"
+        items.append(
+            {
+                "session_id": r.session_id,
+                "job_role": r.job_role,
+                "tech_stack": json.loads(r.tech_stack),
+                "total_score": r.total_score,
+                "duration_minutes": r.duration_minutes,
+                "preview": preview or None,
+                "started_at": r.started_at.isoformat(),
+                "ended_at": r.ended_at.isoformat() if r.ended_at else None,
+            }
+        )
+
+    return SuccessResponse(
+        success=True,
+        message="Interview history retrieved successfully",
+        data={
+            "items": items,
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+        },
+    )
 
 
 @router.get("/{session_id}", response_model=SuccessResponse)
@@ -625,7 +691,7 @@ async def interview_websocket(
         logger.info(f"WebSocket 客户端断开连接: {session_id}")
         pass
     except Exception as e:
-        logger.error(f"WebSocket 错误: {str(e)}")
+        logger.error(f"WebSocket 错误: {str(e)}", exc_info=True)
         await websocket.send_json({
             "type": "error",
             "message": str(e),
