@@ -16,6 +16,7 @@ import {
   Divider,
   Descriptions,
   Tooltip,
+  Collapse,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
@@ -37,6 +38,8 @@ import type {
   InterviewHistoryListItem,
   InterviewReport,
   ResumeStatus,
+  StudyQaSessionListItem,
+  StudyQaSessionDetail,
 } from '../types'
 
 const { Title, Paragraph, Text } = Typography
@@ -55,7 +58,7 @@ const RESUME_TASK_STATUS: Record<
   failed: { color: 'error', text: '失败' },
 }
 
-type HistoryTab = 'resume' | 'interview'
+type HistoryTab = 'resume' | 'interview' | 'studyQa'
 
 function ResumeHistoryPage() {
   const [tab, setTab] = useState<HistoryTab>('resume')
@@ -70,11 +73,17 @@ function ResumeHistoryPage() {
   const [interviewTotal, setInterviewTotal] = useState(0)
   const [interviewPage, setInterviewPage] = useState(1)
 
+  const [studyQaLoading, setStudyQaLoading] = useState(false)
+  const [studyQaItems, setStudyQaItems] = useState<StudyQaSessionListItem[]>([])
+  const [studyQaTotal, setStudyQaTotal] = useState(0)
+  const [studyQaPage, setStudyQaPage] = useState(1)
+
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [drawerKind, setDrawerKind] = useState<'resume' | 'interview' | null>(null)
+  const [drawerKind, setDrawerKind] = useState<'resume' | 'interview' | 'studyQa' | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [resumeDetail, setResumeDetail] = useState<ResumeInfo | null>(null)
   const [interviewReport, setInterviewReport] = useState<InterviewReport | null>(null)
+  const [studyQaDetail, setStudyQaDetail] = useState<StudyQaSessionDetail | null>(null)
 
   const handleUnlockResume = async (id: number) => {
     try {
@@ -146,6 +155,27 @@ function ResumeHistoryPage() {
     }
   }
 
+  const loadStudyQaHistory = async (skip: number, limit: number) => {
+    setStudyQaLoading(true)
+    try {
+      const res = await resumeApi.studyQaSessions(skip, limit)
+      if (res.success && res.data) {
+        setStudyQaItems(Array.isArray(res.data.items) ? res.data.items : [])
+        setStudyQaTotal(typeof res.data.total === 'number' ? res.data.total : 0)
+      } else {
+        setStudyQaItems([])
+        setStudyQaTotal(0)
+        if (!res.success) {
+          message.warning(res.message || '学习问答列表接口异常')
+        }
+      }
+    } catch (e) {
+      message.error(`加载学习问答记录失败: ${(e as Error).message}`)
+    } finally {
+      setStudyQaLoading(false)
+    }
+  }
+
   useEffect(() => {
     void loadResumeHistory((resumePage - 1) * PAGE_SIZE, PAGE_SIZE)
   }, [resumePage])
@@ -155,11 +185,17 @@ function ResumeHistoryPage() {
     void loadInterviewHistory((interviewPage - 1) * PAGE_SIZE, PAGE_SIZE)
   }, [tab, interviewPage])
 
+  useEffect(() => {
+    if (tab !== 'studyQa') return
+    void loadStudyQaHistory((studyQaPage - 1) * PAGE_SIZE, PAGE_SIZE)
+  }, [tab, studyQaPage])
+
   const openResumeDetail = async (id: number) => {
     setDrawerKind('resume')
     setDrawerOpen(true)
     setResumeDetail(null)
     setInterviewReport(null)
+    setStudyQaDetail(null)
     setDetailLoading(true)
     try {
       const res = await resumeApi.get(id)
@@ -175,11 +211,50 @@ function ResumeHistoryPage() {
     }
   }
 
+  const openStudyQaDetail = async (sessionId: number) => {
+    setDrawerKind('studyQa')
+    setDrawerOpen(true)
+    setResumeDetail(null)
+    setInterviewReport(null)
+    setStudyQaDetail(null)
+    setDetailLoading(true)
+    try {
+      const res = await resumeApi.studyQaSessionGet(sessionId)
+      if (res.success && res.data) {
+        setStudyQaDetail(res.data)
+      }
+    } catch (e) {
+      message.error(`加载学习问答详情失败: ${(e as Error).message}`)
+      setDrawerOpen(false)
+      setDrawerKind(null)
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  const handleDeleteStudyQa = async (sessionId: number) => {
+    try {
+      const res = await resumeApi.studyQaSessionDelete(sessionId)
+      if (res.success) {
+        message.success('已删除')
+        setDrawerOpen(false)
+        setDrawerKind(null)
+        setStudyQaDetail(null)
+        void loadStudyQaHistory((studyQaPage - 1) * PAGE_SIZE, PAGE_SIZE)
+      } else {
+        message.error(res.message || '删除失败')
+      }
+    } catch (e) {
+      message.error((e as Error).message)
+    }
+  }
+
   const openInterviewDetail = async (sessionId: string) => {
     setDrawerKind('interview')
     setDrawerOpen(true)
     setResumeDetail(null)
     setInterviewReport(null)
+    setStudyQaDetail(null)
     setDetailLoading(true)
     try {
       const res = await interviewApi.getReport(sessionId)
@@ -532,11 +607,85 @@ function ResumeHistoryPage() {
     },
   ]
 
+  const studyQaColumns: ColumnsType<StudyQaSessionListItem> = [
+    {
+      title: '生成时间',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 180,
+      render: (t: string) => new Date(t).toLocaleString(),
+    },
+    {
+      title: '简历文件',
+      dataIndex: 'original_filename',
+      key: 'original_filename',
+      ellipsis: true,
+      render: (text: string, record) => (
+        <Space direction="vertical" size={0}>
+          <Text strong>{text}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            简历 #{record.resume_id} · 会话 #{record.id}
+          </Text>
+        </Space>
+      ),
+    },
+    {
+      title: '目标岗位',
+      dataIndex: 'target_job_title',
+      key: 'target_job_title',
+      ellipsis: true,
+      render: (t: string | null | undefined) => t || <Text type="secondary">—</Text>,
+    },
+    {
+      title: '条数',
+      dataIndex: 'item_count',
+      key: 'item_count',
+      width: 72,
+      render: (n: number) => <Tag color="blue">{n}</Tag>,
+    },
+    {
+      title: '预览',
+      dataIndex: 'preview',
+      key: 'preview',
+      ellipsis: true,
+      render: (p: string | null | undefined) =>
+        p ? <Text type="secondary">{p}</Text> : <Text type="secondary">—</Text>,
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 160,
+      fixed: 'right',
+      render: (_, record) => (
+        <Space size="small">
+          <Button
+            type="link"
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => void openStudyQaDetail(record.id)}
+          >
+            详情
+          </Button>
+          <Popconfirm
+            title="删除此条学习问答记录？"
+            onConfirm={() => void handleDeleteStudyQa(record.id)}
+          >
+            <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+              删除
+            </Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ]
+
   const refreshCurrent = () => {
     if (tab === 'resume') {
       void loadResumeHistory((resumePage - 1) * PAGE_SIZE, PAGE_SIZE)
-    } else {
+    } else if (tab === 'interview') {
       void loadInterviewHistory((interviewPage - 1) * PAGE_SIZE, PAGE_SIZE)
+    } else {
+      void loadStudyQaHistory((studyQaPage - 1) * PAGE_SIZE, PAGE_SIZE)
     }
   }
 
@@ -557,6 +706,9 @@ function ResumeHistoryPage() {
           <Link to="/resume">
             <Button>简历优化</Button>
           </Link>
+          <Link to="/resume/study-qa">
+            <Button>学习问答</Button>
+          </Link>
           <Link to="/interview">
             <Button type="primary" icon={<AudioOutlined />}>
               面试模拟
@@ -569,6 +721,7 @@ function ResumeHistoryPage() {
         <strong>简历任务</strong>：汇总上传、解析、待优化、优化中、已完成、失败等全部记录（原「上传记录」已合并至此）。
         优化中可「继续任务」打开工作流；若页面关闭导致中断，可用「解除卡住」后重新发起。
         <strong>面试模拟</strong>：查看历史评估报告。
+        <strong>学习问答</strong>：每次「生成学习问答」的持久化记录，可查看详情或删除。
       </Paragraph>
 
       <Card
@@ -585,6 +738,9 @@ function ResumeHistoryPage() {
             setTab(next)
             if (next === 'interview') {
               setInterviewLoading(true)
+            }
+            if (next === 'studyQa') {
+              setStudyQaLoading(true)
             }
           }}
           items={[
@@ -639,6 +795,32 @@ function ResumeHistoryPage() {
                 </Spin>
               ),
             },
+            {
+              key: 'studyQa',
+              label: '学习问答',
+              children: (
+                <Spin spinning={studyQaLoading}>
+                  {studyQaItems.length === 0 && !studyQaLoading ? (
+                    <Empty description="暂无学习问答记录，请在「学习问答」页或简历优化结果中生成" />
+                  ) : (
+                    <Table<StudyQaSessionListItem>
+                      rowKey="id"
+                      columns={studyQaColumns}
+                      dataSource={studyQaItems}
+                      scroll={{ x: 960 }}
+                      pagination={{
+                        current: studyQaPage,
+                        pageSize: PAGE_SIZE,
+                        total: studyQaTotal,
+                        showTotal: (t) => `共 ${t} 条`,
+                        onChange: (p) => setStudyQaPage(p),
+                      }}
+                      size="middle"
+                    />
+                  )}
+                </Spin>
+              ),
+            },
           ]}
         />
       </Card>
@@ -649,7 +831,9 @@ function ResumeHistoryPage() {
             ? `优化结果 · ${resumeDetail.original_filename}`
             : drawerKind === 'interview' && interviewReport
               ? `面试报告 · ${interviewReport.job_role}`
-              : '加载中…'
+              : drawerKind === 'studyQa' && studyQaDetail
+                ? `学习问答 · ${studyQaDetail.original_filename}`
+                : '加载中…'
         }
         placement="right"
         width={720}
@@ -658,6 +842,7 @@ function ResumeHistoryPage() {
           setDrawerKind(null)
           setResumeDetail(null)
           setInterviewReport(null)
+          setStudyQaDetail(null)
         }}
         open={drawerOpen}
         extra={
@@ -669,6 +854,12 @@ function ResumeHistoryPage() {
             <Button type="primary" icon={<DownloadOutlined />} onClick={handleDownloadInterviewMd}>
               下载报告 Markdown
             </Button>
+          ) : drawerKind === 'studyQa' && studyQaDetail ? (
+            <Popconfirm title="删除此条记录？" onConfirm={() => void handleDeleteStudyQa(studyQaDetail.id)}>
+              <Button danger icon={<DeleteOutlined />}>
+                删除
+              </Button>
+            </Popconfirm>
           ) : null
         }
       >
@@ -805,6 +996,51 @@ function ResumeHistoryPage() {
                   {interviewReport.detailed_report || '_暂无详细报告_'}
                 </ReactMarkdown>
               </div>
+            </>
+          )}
+
+          {drawerKind === 'studyQa' && studyQaDetail && (
+            <>
+              <Descriptions column={1} size="small" style={{ marginBottom: 16 }} bordered>
+                <Descriptions.Item label="会话 ID">{studyQaDetail.id}</Descriptions.Item>
+                <Descriptions.Item label="简历 ID">{studyQaDetail.resume_id}</Descriptions.Item>
+                <Descriptions.Item label="文件名">{studyQaDetail.original_filename}</Descriptions.Item>
+                <Descriptions.Item label="目标岗位">
+                  {studyQaDetail.target_job_title || '—'}
+                </Descriptions.Item>
+                <Descriptions.Item label="状态">
+                  <Tag>{studyQaDetail.status}</Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="生成时间">
+                  {new Date(studyQaDetail.created_at).toLocaleString()}
+                </Descriptions.Item>
+                <Descriptions.Item label="条数">{studyQaDetail.item_count}</Descriptions.Item>
+                {studyQaDetail.target_job_url ? (
+                  <Descriptions.Item label="岗位链接">
+                    <a href={studyQaDetail.target_job_url} target="_blank" rel="noreferrer">
+                      {studyQaDetail.target_job_url}
+                    </a>
+                  </Descriptions.Item>
+                ) : null}
+              </Descriptions>
+              <Collapse
+                items={studyQaDetail.items.map((item, idx) => ({
+                  key: String(idx),
+                  label: `${idx + 1}. ${item.topic} · ${item.question.length > 72 ? `${item.question.slice(0, 72)}…` : item.question}`,
+                  children: (
+                    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                      <div>
+                        <Text strong>问题</Text>
+                        <Paragraph style={{ marginTop: 8, marginBottom: 0 }}>{item.question}</Paragraph>
+                      </div>
+                      <div>
+                        <Text strong>答题要点</Text>
+                        <Paragraph style={{ marginTop: 8, marginBottom: 0 }}>{item.answer_hint}</Paragraph>
+                      </div>
+                    </Space>
+                  ),
+                }))}
+              />
             </>
           )}
         </Spin>

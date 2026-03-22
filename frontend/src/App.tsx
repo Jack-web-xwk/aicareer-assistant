@@ -9,19 +9,24 @@ import {
   SearchOutlined,
   AimOutlined,
   FolderOpenOutlined,
+  ReadOutlined,
 } from '@ant-design/icons'
 import HomePage from './pages/HomePage'
 import ResumeOptimizerPage from './pages/ResumeOptimizerPage'
 import ResumeHistoryPage from './pages/ResumeHistoryPage'
+import ResumeStudyQaPage from './pages/ResumeStudyQaPage'
 import InterviewSimulatorPage from './pages/InterviewSimulatorPage'
 import JobsPage from './pages/JobsPage'
 import SavedJobsPage from './pages/SavedJobsPage'
 import TargetJobUrlPage from './pages/TargetJobUrlPage'
+import LearnPage from './pages/LearnPage'
 
 const { Header, Content, Footer } = Layout
 const { Title } = Typography
 
 function menuSelectedKey(pathname: string): string {
+  if (pathname.startsWith('/learn')) return '/learn'
+  if (pathname.startsWith('/resume/study-qa')) return '/resume/study-qa'
   if (pathname.startsWith('/resume/history')) return '/resume/history'
   if (pathname.startsWith('/target-jobs')) return '/target-jobs'
   if (pathname.startsWith('/jobs/saved')) return '/jobs/saved'
@@ -68,6 +73,11 @@ function AppLayout() {
       key: '/interview',
       icon: <AudioOutlined />,
       label: <Link to="/interview">面试模拟</Link>,
+    },
+    {
+      key: '/learn',
+      icon: <ReadOutlined />,
+      label: <Link to="/learn">学无止境</Link>,
     },
   ]
 
@@ -127,7 +137,9 @@ function AppLayout() {
           <Route path="/jobs" element={<JobsPage />} />
           <Route path="/target-jobs" element={<TargetJobUrlPage />} />
           <Route path="/resume/history" element={<ResumeHistoryPage />} />
+          <Route path="/resume/study-qa" element={<ResumeStudyQaPage />} />
           <Route path="/resume" element={<ResumeOptimizerPage />} />
+          <Route path="/learn" element={<LearnPage />} />
           <Route path="/interview" element={<InterviewSimulatorPage />} />
         </Routes>
       </Content>

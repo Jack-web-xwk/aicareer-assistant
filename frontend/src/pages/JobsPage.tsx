@@ -36,6 +36,7 @@ const SOURCE_LABEL: Record<JobSource, string> = {
   zhaopin: '智联招聘',
   yupao: '鱼泡',
   link: '链接',
+  screenshot: '截图',
 }
 
 const SOURCE_COLOR: Record<JobSource, string> = {
@@ -43,6 +44,7 @@ const SOURCE_COLOR: Record<JobSource, string> = {
   zhaopin: 'green',
   yupao: 'orange',
   link: 'purple',
+  screenshot: 'cyan',
 }
 
 const SUGGEST_KEYWORDS = ['Java', 'Python', '前端开发', '产品经理', '数据分析师']

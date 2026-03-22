@@ -126,6 +126,71 @@ export interface StudyQaItem {
   answer_hint: string
 }
 
+/** POST /resume/{id}/study-qa 成功后的 data（含持久化字段） */
+export interface StudyQaGenerateResponse {
+  session_id: number
+  resume_id: number
+  items: StudyQaItem[]
+  item_count: number
+  created_at: string
+}
+
+/** GET /resume/study-qa-sessions 列表项 */
+export interface StudyQaSessionListItem {
+  id: number
+  resume_id: number
+  original_filename: string
+  target_job_title?: string | null
+  item_count: number
+  preview?: string | null
+  created_at: string
+}
+
+/** GET /resume/study-qa-sessions/{id} 详情 */
+export interface StudyQaSessionDetail {
+  id: number
+  resume_id: number
+  original_filename: string
+  file_type: string
+  target_job_title?: string | null
+  target_job_url?: string | null
+  status: string
+  items: StudyQaItem[]
+  item_count: number
+  created_at: string
+}
+
+// Learn (学无止境) Types
+
+export interface LearningArticleListItem {
+  id: number
+  phase_id: number
+  title: string
+  sort_order: number
+  external_url?: string | null
+  created_at: string
+}
+
+export interface LearningPhase {
+  id: number
+  title: string
+  subtitle: string
+  sort_order: number
+  articles: LearningArticleListItem[]
+  created_at: string
+}
+
+export interface LearningArticleDetail {
+  id: number
+  phase_id: number
+  title: string
+  sort_order: number
+  content_md: string
+  external_url?: string | null
+  created_at: string
+  updated_at: string
+}
+
 /** GET /resume/history 列表项（无完整正文） */
 export interface ResumeHistoryListItem {
   id: number

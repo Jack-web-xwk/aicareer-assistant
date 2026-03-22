@@ -31,7 +31,11 @@ import type {
   ResumeInfo,
   ResumeHistoryListItem,
   InterviewHistoryListItem,
-  StudyQaItem,
+  StudyQaGenerateResponse,
+  StudyQaSessionListItem,
+  StudyQaSessionDetail,
+  LearningPhase,
+  LearningArticleDetail,
   ResumeStreamMessage,
   InterviewSession,
   InterviewStartRequest,
@@ -221,11 +225,55 @@ export const resumeApi = {
     return response.data
   },
 
-  /** 根据已完成优化的任务生成学习/面试准备问答 */
+  /** 根据已完成优化的任务生成学习/面试准备问答（并持久化） */
   studyQa: async (
     resumeId: number
-  ): Promise<ApiResponse<{ items: StudyQaItem[] }>> => {
+  ): Promise<ApiResponse<StudyQaGenerateResponse>> => {
     const response = await api.post(`/resume/${resumeId}/study-qa`)
+    return response.data
+  },
+
+  studyQaSessions: async (
+    skip = 0,
+    limit = 50,
+    resumeId?: number
+  ): Promise<
+    ApiResponse<{
+      items: StudyQaSessionListItem[]
+      total: number
+      skip: number
+      limit: number
+    }>
+  > => {
+    let url = `/resume/study-qa-sessions?skip=${skip}&limit=${limit}`
+    if (resumeId != null) url += `&resume_id=${resumeId}`
+    const response = await api.get(url)
+    return response.data
+  },
+
+  studyQaSessionGet: async (
+    sessionId: number
+  ): Promise<ApiResponse<StudyQaSessionDetail>> => {
+    const response = await api.get(`/resume/study-qa-sessions/${sessionId}`)
+    return response.data
+  },
+
+  studyQaSessionDelete: async (sessionId: number): Promise<ApiResponse> => {
+    const response = await api.delete(`/resume/study-qa-sessions/${sessionId}`)
+    return response.data
+  },
+}
+
+/** 学无止境专栏 */
+export const learnApi = {
+  phases: async (): Promise<
+    ApiResponse<{ phases: LearningPhase[] }>
+  > => {
+    const response = await api.get('/learn/phases')
+    return response.data
+  },
+  article: async (articleId: number): Promise<ApiResponse<LearningArticleDetail>> => {
+    const response = await api.get(`/learn/articles/${articleId}`)
     return response.data
   },
 }

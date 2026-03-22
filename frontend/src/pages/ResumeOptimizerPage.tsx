@@ -30,6 +30,7 @@ import {
   Segmented,
   Select,
   Collapse,
+  Tabs,
 } from 'antd'
 import {
   InboxOutlined,
@@ -39,6 +40,7 @@ import {
   CheckCircleOutlined,
   DownloadOutlined,
   CopyOutlined,
+  QuestionCircleOutlined,
   LoadingOutlined,
   ClockCircleOutlined,
   HistoryOutlined,
@@ -111,8 +113,13 @@ function ResumeOptimizerPage() {
   /** 学习问答（面试准备），按 resumeId 清空 */
   const [studyQaItems, setStudyQaItems] = useState<StudyQaItem[]>([])
   const [studyQaLoading, setStudyQaLoading] = useState(false)
+  const [studyQaPrefillLoading, setStudyQaPrefillLoading] = useState(false)
+  /** 查看结果步骤：右侧「优化简历」与「学习问答」Tab */
+  const [resultViewTab, setResultViewTab] = useState<'resume' | 'studyQa'>('resume')
   /** 本页正在接收 SSE 流时为 true，避免与轮询重复请求 */
   const streamActiveRef = useRef(false)
+  /** 学习问答预填：已尝试的 resumeId，避免 Tab 切换时重复请求 */
+  const lastPrefetchResumeIdRef = useRef<number | null>(null)
 
   /** LangGraph 各节点 SSE 返回的结构化数据 + 思考说明 */
   const [nodeOutputs, setNodeOutputs] = useState<
@@ -319,7 +326,68 @@ function ResumeOptimizerPage() {
 
   useEffect(() => {
     setStudyQaItems([])
+    setResultViewTab('resume')
+    lastPrefetchResumeIdRef.current = null
   }, [resumeId])
+
+  /** 预填学习问答：拉取该简历最近一次持久化会话 */
+  const prefetchStudyQa = useCallback(async () => {
+    if (resumeId == null) return
+    setStudyQaPrefillLoading(true)
+    try {
+      const listRes = await resumeApi.studyQaSessions(0, 1, resumeId)
+      if (!listRes.success || !listRes.data?.items?.length) return
+      const sid = listRes.data.items[0].id
+      const detailRes = await resumeApi.studyQaSessionGet(sid)
+      if (!detailRes.success || !detailRes.data?.items?.length) return
+      setStudyQaItems(detailRes.data.items)
+    } catch {
+      /* 忽略预填失败 */
+    } finally {
+      setStudyQaPrefillLoading(false)
+    }
+  }, [resumeId])
+
+  /** 已优化简历：预填最近一次持久化的学习问答 */
+  useEffect(() => {
+    if (resumeId == null || resumeStatus !== 'optimized') return
+    let cancelled = false
+    setStudyQaPrefillLoading(true)
+    void (async () => {
+      try {
+        const listRes = await resumeApi.studyQaSessions(0, 1, resumeId)
+        if (cancelled || !listRes.success || !listRes.data?.items?.length) return
+        const sid = listRes.data.items[0].id
+        const detailRes = await resumeApi.studyQaSessionGet(sid)
+        if (cancelled || !detailRes.success || !detailRes.data?.items?.length) return
+        setStudyQaItems(detailRes.data.items)
+      } catch {
+        /* 忽略预填失败 */
+      } finally {
+        if (!cancelled) setStudyQaPrefillLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+      setStudyQaPrefillLoading(false)
+    }
+  }, [resumeId, resumeStatus])
+
+  /** 切换到学习问答 Tab 时，若无数据则尝试预填（兜底，避免初次预填被取消） */
+  useEffect(() => {
+    if (
+      resultViewTab === 'studyQa' &&
+      resumeId != null &&
+      resumeStatus === 'optimized' &&
+      studyQaItems.length === 0 &&
+      !studyQaPrefillLoading &&
+      !studyQaLoading &&
+      lastPrefetchResumeIdRef.current !== resumeId
+    ) {
+      lastPrefetchResumeIdRef.current = resumeId
+      void prefetchStudyQa()
+    }
+  }, [resultViewTab, resumeId, resumeStatus, studyQaItems.length, studyQaPrefillLoading, studyQaLoading, prefetchStudyQa])
 
   const handleGenerateStudyQa = useCallback(async () => {
     if (resumeId == null) return
@@ -328,7 +396,7 @@ function ResumeOptimizerPage() {
       const res = await resumeApi.studyQa(resumeId)
       if (res.success && res.data?.items?.length) {
         setStudyQaItems(res.data.items)
-        message.success('已生成学习问答')
+        message.success('已生成学习问答，结果已保存，可在「历史结果」中查看')
       } else {
         message.error(res.message || '生成失败')
       }
@@ -989,31 +1057,119 @@ function ResumeOptimizerPage() {
           )}
 
           <Col xs={24} lg={matchAnalysis ? 16 : 24}>
-            <Card
-              title="优化后的简历"
-              extra={
-                <Space>
-                  <Button icon={<CopyOutlined />} onClick={handleCopy}>
-                    复制
-                  </Button>
-                  <Button type="primary" icon={<DownloadOutlined />} onClick={handleDownload}>
-                    下载 Markdown
-                  </Button>
-                </Space>
-              }
-              style={cardStyle}
-            >
-              <div
-                style={{
-                  maxHeight: '600px',
-                  overflowY: 'auto',
-                  padding: '16px',
-                  background: 'var(--color-bg-secondary)',
-                  borderRadius: '8px',
-                }}
-              >
-                <ReactMarkdown components={markdownComponents}>{optimizedResume}</ReactMarkdown>
-              </div>
+            <Card title="优化结果" style={cardStyle}>
+              <Tabs
+                activeKey={resultViewTab}
+                onChange={(k) => setResultViewTab(k as 'resume' | 'studyQa')}
+                tabBarExtraContent={
+                  resultViewTab === 'resume' ? (
+                    <Space>
+                      <Button icon={<CopyOutlined />} onClick={handleCopy}>
+                        复制
+                      </Button>
+                      <Button type="primary" icon={<DownloadOutlined />} onClick={handleDownload}>
+                        下载 Markdown
+                      </Button>
+                    </Space>
+                  ) : resumeStatus === 'optimized' && resumeId != null ? (
+                    <Button
+                      type="primary"
+                      loading={studyQaLoading}
+                      onClick={() => void handleGenerateStudyQa()}
+                    >
+                      生成学习问答
+                    </Button>
+                  ) : null
+                }
+                items={[
+                  {
+                    key: 'resume',
+                    label: '优化简历',
+                    children: (
+                      <div
+                        style={{
+                          maxHeight: '600px',
+                          overflowY: 'auto',
+                          padding: '16px',
+                          background: 'var(--color-bg-secondary)',
+                          borderRadius: '8px',
+                        }}
+                      >
+                        <ReactMarkdown components={markdownComponents}>
+                          {optimizedResume}
+                        </ReactMarkdown>
+                      </div>
+                    ),
+                  },
+                  {
+                    key: 'studyQa',
+                    label: (
+                      <span>
+                        <QuestionCircleOutlined style={{ marginRight: 6 }} />
+                        学习问答
+                      </span>
+                    ),
+                    children:
+                      resumeStatus === 'optimized' && resumeId != null ? (
+                        <div>
+                          <Paragraph type="secondary" style={{ marginBottom: 12 }}>
+                            根据当前任务的目标岗位、匹配分析与优化稿生成面试准备问题与答题要点；每次点击将重新调用模型生成。
+                          </Paragraph>
+                          {studyQaPrefillLoading ? (
+                            <div style={{ padding: '24px 0', textAlign: 'center' }}>
+                              <Spin tip="正在加载历史记录..." />
+                            </div>
+                          ) : studyQaItems.length === 0 ? (
+                            <Space direction="vertical" size="middle">
+                              <Paragraph type="secondary">
+                                点击右上方「生成学习问答」根据当前简历与岗位生成面试准备问题；生成结果会持久化，可在「历史结果 → 学习问答」中查看。
+                              </Paragraph>
+                              <Button
+                                type="link"
+                                size="small"
+                                loading={studyQaPrefillLoading}
+                                onClick={() => void prefetchStudyQa()}
+                              >
+                                重新加载历史记录
+                              </Button>
+                            </Space>
+                          ) : (
+                            <div>
+                              <Paragraph type="secondary" style={{ marginBottom: 12 }}>
+                                结果已保存，可在「历史结果 → 学习问答」中查看。
+                              </Paragraph>
+                              <Collapse
+                              items={studyQaItems.map((item, idx) => ({
+                                key: String(idx),
+                                label: (
+                                  <span>
+                                    <Tag color="processing" style={{ marginRight: 8 }}>
+                                      {item.topic}
+                                    </Tag>
+                                    {item.question}
+                                  </span>
+                                ),
+                                children: (
+                                  <Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
+                                    {item.answer_hint}
+                                  </Paragraph>
+                                ),
+                              }))}
+                            />
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <Alert
+                          type="info"
+                          showIcon
+                          message="请先完成简历优化"
+                          description="优化完成后可在此 Tab 生成学习问答。"
+                        />
+                      ),
+                  },
+                ]}
+              />
             </Card>
 
             <div style={{ marginTop: '24px', textAlign: 'center' }}>
@@ -1023,52 +1179,6 @@ function ResumeOptimizerPage() {
             </div>
           </Col>
         </Row>
-
-        {resumeStatus === 'optimized' && resumeId != null ? (
-          <Row gutter={[24, 24]} style={{ marginTop: 16 }}>
-            <Col span={24}>
-              <Card
-                title="学习问答（面试准备）"
-                style={cardStyle}
-                extra={
-                  <Button
-                    type="primary"
-                    loading={studyQaLoading}
-                    onClick={() => void handleGenerateStudyQa()}
-                  >
-                    生成学习问答
-                  </Button>
-                }
-              >
-                <Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                  根据当前任务的目标岗位、匹配分析与优化稿生成面试准备问题与答题要点；每次点击将重新调用模型生成。
-                </Paragraph>
-                {studyQaItems.length === 0 ? (
-                  <Text type="secondary">尚未生成，点击右上方按钮。</Text>
-                ) : (
-                  <Collapse
-                    items={studyQaItems.map((item, idx) => ({
-                      key: String(idx),
-                      label: (
-                        <span>
-                          <Tag color="processing" style={{ marginRight: 8 }}>
-                            {item.topic}
-                          </Tag>
-                          {item.question}
-                        </span>
-                      ),
-                      children: (
-                        <Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
-                          {item.answer_hint}
-                        </Paragraph>
-                      ),
-                    }))}
-                  />
-                )}
-              </Card>
-            </Col>
-          </Row>
-        ) : null}
 
         <Row gutter={[24, 24]} style={{ marginTop: 16 }}>
           <Col span={24}>
