@@ -109,3 +109,8 @@ pnpm-debug.log*
 *.tmp
 *.temp
 .cache/
+.specstory
+./backend/.venv
+./backend/.env
+./frontend/node_modules
+
