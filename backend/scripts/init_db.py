@@ -12,7 +12,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from app.core.database import create_tables, drop_tables, engine
+from app.core.database import create_tables, drop_tables, ensure_sqlite_schema, engine
 
 
 async def init_database(drop_existing: bool = False):
@@ -31,6 +31,7 @@ async def init_database(drop_existing: bool = False):
     
     print("📝 Creating tables...")
     await create_tables()
+    await ensure_sqlite_schema()
     print("✅ Database tables created successfully!")
     
     # 关闭引擎
