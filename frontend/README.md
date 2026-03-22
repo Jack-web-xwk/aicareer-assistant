@@ -12,6 +12,7 @@
 - React 18
 - TypeScript
 - Ant Design 5.x
+- Zustand（职位搜索筛选与历史等本地状态）
 - Vite（构建工具）
 - Axios（HTTP 请求）
 
@@ -45,6 +46,7 @@ npm run build
 
 ## 注意事项
 - 组件使用函数式组件 + Hooks
-- 状态管理使用 React Context 或 Zustand
-- API 调用统一封装在 services 目录
+- 状态管理：简历/面试等可用 Context；**职位搜索**使用 `src/stores/jobSearchStore.ts`（Zustand + 搜索历史持久化）
+- API 调用统一封装在 services 目录；`jobSearchApi.search` 支持 `AbortSignal` 取消上一次请求
 - 所有组件和函数需添加 TypeScript 类型
+- 职位搜索页 `/jobs` 依赖后端 `POST /api/jobs/search`；后端对搜索接口有 **每 IP 每分钟 10 次** 限流，频繁请求将返回 429
