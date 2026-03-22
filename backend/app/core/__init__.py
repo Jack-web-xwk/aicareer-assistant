@@ -5,7 +5,7 @@ Core module - 核心配置和工具
 """
 
 from .config import settings
-from .database import get_db, create_tables
+from .database import get_db, create_tables, ensure_sqlite_schema
 from .exceptions import (
     AppException,
     NotFoundException,
@@ -17,6 +17,7 @@ __all__ = [
     "settings",
     "get_db",
     "create_tables",
+    "ensure_sqlite_schema",
     "AppException",
     "NotFoundException",
     "ValidationException",

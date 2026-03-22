@@ -19,8 +19,9 @@ class Settings(BaseSettings):
     
     # ========== LLM Provider Configuration ==========
     # 通用 LLM 配置（优先级最高）
-    LLM_PROVIDER: str = "deepseek"  # openai, deepseek, zhipu, ollama, anthropic, qwen
+    LLM_PROVIDER: str = "deepseek"  # openai, deepseek, zhipu, ollama, anthropic, qwen, bailian
     LLM_MODEL: str = ""           # 留空则使用各提供商默认模型
+    LLM_REQUEST_TIMEOUT: int = 120  # 单次 LLM 请求超时（秒）
     
     # OpenAI Configuration
     OPENAI_API_KEY: str = ""
@@ -46,6 +47,11 @@ class Settings(BaseSettings):
     # 通义千问 Qwen Configuration
     QWEN_API_KEY: str = ""
     QWEN_MODEL: str = "qwen-turbo"
+
+    # 阿里百炼 Bailian Configuration
+    BAILIAN_API_KEY: str = ""
+    BAILIAN_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    BAILIAN_MODEL: str = "qwen-plus"
     
     # Database Configuration
     DATABASE_URL: str = "sqlite+aiosqlite:///./data/career_assistant.db"
@@ -68,6 +74,10 @@ class Settings(BaseSettings):
     
     # Interview Settings
     MAX_INTERVIEW_QUESTIONS: int = 5
+
+    # Job search (crawler aggregation)
+    JOB_SEARCH_RATE_LIMIT_PER_MINUTE: int = 10
+    JOB_SEARCH_CACHE_TTL_SECONDS: float = 300.0
     
     model_config = SettingsConfigDict(
         env_file=".env",

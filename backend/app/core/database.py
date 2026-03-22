@@ -6,6 +6,7 @@ Database Configuration - 数据库配置
 
 from typing import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -14,6 +15,9 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 from .config import settings
+from app.utils.logger import get_logger
+
+_logger = get_logger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -50,6 +54,38 @@ async def create_tables() -> None:
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+
+async def ensure_sqlite_schema() -> None:
+    """
+    SQLite 轻量迁移：为已存在的旧表补充 ORM 新增列。
+
+    SQLAlchemy create_all 不会修改已有表结构，旧库会缺列导致 INSERT 失败。
+    """
+    url = (settings.DATABASE_URL or "").lower()
+    if "sqlite" not in url:
+        return
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='resumes' LIMIT 1"
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            return
+
+        result = await conn.execute(text("PRAGMA table_info(resumes)"))
+        rows = result.fetchall()
+        column_names = {row[1] for row in rows}
+
+        if "job_snapshot" not in column_names:
+            await conn.execute(
+                text("ALTER TABLE resumes ADD COLUMN job_snapshot TEXT")
+            )
+            _logger.info(
+                "SQLite 已补充 resumes.job_snapshot 列（旧库自动迁移）"
+            )
 
 
 async def drop_tables() -> None:
