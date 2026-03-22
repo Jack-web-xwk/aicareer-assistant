@@ -47,7 +47,7 @@ function AppLayout() {
     {
       key: '/target-jobs',
       icon: <AimOutlined />,
-      label: <Link to="/target-jobs">目标岗位</Link>,
+      label: <Link to="/target-jobs">目标岗位（链接/截图）</Link>,
     },
     {
       key: '/jobs/saved',

@@ -27,10 +27,17 @@ export interface JobSnapshot {
   company_scale?: string | null
   financing_stage?: string | null
   responsibilities?: string[]
+  qualifications?: string[]
   required_skills?: string[]
   preferred_skills?: string[]
+  tech_stack_tags?: string[]
+  benefits?: string[]
   experience_years?: string | null
   education_requirement?: string | null
+  work_address?: string | null
+  work_schedule?: string | null
+  recruiter_name?: string | null
+  recruiter_title?: string | null
   source_url?: string
   scrape_error?: string
 }
@@ -110,6 +117,13 @@ export interface MatchAnalysis {
   strengths: string[]
   areas_to_improve: string[]
   suggestions: string[]
+}
+
+/** POST /resume/{id}/study-qa 返回的单条学习/面试准备问答 */
+export interface StudyQaItem {
+  topic: string
+  question: string
+  answer_hint: string
 }
 
 /** GET /resume/history 列表项（无完整正文） */
@@ -266,7 +280,7 @@ export interface SSEMessage {
 
 // Job search (multi-source aggregation)
 
-export type JobSource = 'boss' | 'zhaopin' | 'yupao' | 'link'
+export type JobSource = 'boss' | 'zhaopin' | 'yupao' | 'link' | 'screenshot'
 
 export type JobMatchMode = 'fuzzy' | 'exact'
 

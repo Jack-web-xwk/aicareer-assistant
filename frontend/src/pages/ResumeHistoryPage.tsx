@@ -374,7 +374,7 @@ function ResumeHistoryPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 320,
+      width: 400,
       fixed: 'right',
       render: (_, record) => (
         <Space wrap size="small">
@@ -421,14 +421,21 @@ function ResumeHistoryPage() {
           ) : null}
           {record.status === 'optimized' ? (
             <>
-              <Button
-                type="link"
-                size="small"
-                icon={<EyeOutlined />}
-                onClick={() => openResumeDetail(record.id)}
-              >
-                查看
-              </Button>
+              <Link to={`/resume?resumeId=${record.id}`}>
+                <Button type="primary" size="small" icon={<EyeOutlined />}>
+                  查看结果
+                </Button>
+              </Link>
+              <Tooltip title="在侧栏快速预览匹配分析与优化稿，不跳转页面">
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<EyeOutlined />}
+                  onClick={() => openResumeDetail(record.id)}
+                >
+                  侧栏预览
+                </Button>
+              </Tooltip>
               <Button
                 type="link"
                 size="small"

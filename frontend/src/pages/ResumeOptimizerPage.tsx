@@ -29,6 +29,7 @@ import {
   Drawer,
   Segmented,
   Select,
+  Collapse,
 } from 'antd'
 import {
   InboxOutlined,
@@ -45,7 +46,7 @@ import {
 import type { UploadFile } from 'antd/es/upload/interface'
 import ReactMarkdown from 'react-markdown'
 import { Link, useSearchParams } from 'react-router-dom'
-import { resumeApi } from '../services/api'
+import { jobSavedApi, resumeApi } from '../services/api'
 import type {
   MatchAnalysis,
   ResumeInfo,
@@ -54,6 +55,7 @@ import type {
   ResumeStreamMessage,
   ResumeStatus,
   ResumeUploadListItem,
+  StudyQaItem,
 } from '../types'
 
 const { Title, Paragraph, Text } = Typography
@@ -106,6 +108,9 @@ function ResumeOptimizerPage() {
   /** 与后端简历状态同步，用于轮询「优化中」任务 */
   const [resumeStatus, setResumeStatus] = useState<ResumeStatus | null>(null)
   const [resumeErrorMessage, setResumeErrorMessage] = useState<string | null>(null)
+  /** 学习问答（面试准备），按 resumeId 清空 */
+  const [studyQaItems, setStudyQaItems] = useState<StudyQaItem[]>([])
+  const [studyQaLoading, setStudyQaLoading] = useState(false)
   /** 本页正在接收 SSE 流时为 true，避免与轮询重复请求 */
   const streamActiveRef = useRef(false)
 
@@ -227,6 +232,28 @@ function ResumeOptimizerPage() {
     }
   }, [targetJobUrlFromQuery])
 
+  /** 从「截图保存」入口带 ?savedJobId= 加载伪链接 job:screenshot:… */
+  const savedJobIdFromQuery = searchParams.get('savedJobId')
+  useEffect(() => {
+    if (!savedJobIdFromQuery) return
+    const id = parseInt(savedJobIdFromQuery, 10)
+    if (Number.isNaN(id)) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await jobSavedApi.get(id)
+        if (cancelled || !res.success || !res.data) return
+        setJobUrl(res.data.detail_url)
+        message.success('已载入截图保存的职位')
+      } catch (e) {
+        message.error(`加载已保存职位失败: ${(e as Error).message}`)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [savedJobIdFromQuery])
+
   /** 从「历史结果」等入口带 ?resumeId= 恢复工作流界面 */
   useEffect(() => {
     if (!resumeIdFromQuery) return
@@ -289,6 +316,28 @@ function ResumeOptimizerPage() {
     }, 2000)
     return () => clearInterval(interval)
   }, [resumeId, resumeStatus, applyAllDone])
+
+  useEffect(() => {
+    setStudyQaItems([])
+  }, [resumeId])
+
+  const handleGenerateStudyQa = useCallback(async () => {
+    if (resumeId == null) return
+    setStudyQaLoading(true)
+    try {
+      const res = await resumeApi.studyQa(resumeId)
+      if (res.success && res.data?.items?.length) {
+        setStudyQaItems(res.data.items)
+        message.success('已生成学习问答')
+      } else {
+        message.error(res.message || '生成失败')
+      }
+    } catch (e) {
+      message.error((e as Error).message)
+    } finally {
+      setStudyQaLoading(false)
+    }
+  }, [resumeId])
 
   /** 第一步进入时拉取已上传简历列表，供「使用已有简历」 */
   useEffect(() => {
@@ -974,6 +1023,52 @@ function ResumeOptimizerPage() {
             </div>
           </Col>
         </Row>
+
+        {resumeStatus === 'optimized' && resumeId != null ? (
+          <Row gutter={[24, 24]} style={{ marginTop: 16 }}>
+            <Col span={24}>
+              <Card
+                title="学习问答（面试准备）"
+                style={cardStyle}
+                extra={
+                  <Button
+                    type="primary"
+                    loading={studyQaLoading}
+                    onClick={() => void handleGenerateStudyQa()}
+                  >
+                    生成学习问答
+                  </Button>
+                }
+              >
+                <Paragraph type="secondary" style={{ marginBottom: 12 }}>
+                  根据当前任务的目标岗位、匹配分析与优化稿生成面试准备问题与答题要点；每次点击将重新调用模型生成。
+                </Paragraph>
+                {studyQaItems.length === 0 ? (
+                  <Text type="secondary">尚未生成，点击右上方按钮。</Text>
+                ) : (
+                  <Collapse
+                    items={studyQaItems.map((item, idx) => ({
+                      key: String(idx),
+                      label: (
+                        <span>
+                          <Tag color="processing" style={{ marginRight: 8 }}>
+                            {item.topic}
+                          </Tag>
+                          {item.question}
+                        </span>
+                      ),
+                      children: (
+                        <Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
+                          {item.answer_hint}
+                        </Paragraph>
+                      ),
+                    }))}
+                  />
+                )}
+              </Card>
+            </Col>
+          </Row>
+        ) : null}
 
         <Row gutter={[24, 24]} style={{ marginTop: 16 }}>
           <Col span={24}>

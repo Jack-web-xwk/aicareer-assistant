@@ -31,6 +31,7 @@ import type {
   ResumeInfo,
   ResumeHistoryListItem,
   InterviewHistoryListItem,
+  StudyQaItem,
   ResumeStreamMessage,
   InterviewSession,
   InterviewStartRequest,
@@ -219,6 +220,14 @@ export const resumeApi = {
     const response = await api.post(`/resume/${resumeId}/unlock-optimization`)
     return response.data
   },
+
+  /** 根据已完成优化的任务生成学习/面试准备问答 */
+  studyQa: async (
+    resumeId: number
+  ): Promise<ApiResponse<{ items: StudyQaItem[] }>> => {
+    const response = await api.post(`/resume/${resumeId}/study-qa`)
+    return response.data
+  },
 }
 
 /** 职位搜索：传入 AbortSignal 可取消未完成的请求 */
@@ -258,6 +267,10 @@ export const jobSavedApi = {
     const response = await api.delete(`/jobs/saved/${jobId}`)
     return response.data
   },
+  get: async (jobId: number): Promise<ApiResponse<SavedJobRecord>> => {
+    const response = await api.get(`/jobs/saved/${jobId}`)
+    return response.data
+  },
 }
 
 /** 粘贴岗位详情 URL → 服务端爬取并写入 saved_jobs */
@@ -271,6 +284,26 @@ export const jobScrapeApi = {
     }>
   > => {
     const response = await api.post('/jobs/scrape-url', { url }, { timeout: 300000 })
+    return response.data
+  },
+  /** 上传截图 → 多模态识别并写入 saved_jobs */
+  fromScreenshot: async (
+    file: File
+  ): Promise<
+    ApiResponse<{
+      saved: SavedJobRecord
+      job_snapshot: Record<string, unknown>
+    }>
+  > => {
+    const form = new FormData()
+    form.append('file', file)
+    // 与默认 headers 的 application/json 冲突时必须显式 multipart，否则后端收不到 file（422）
+    const response = await api.post('/jobs/from-screenshot', form, {
+      timeout: 300000,
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    })
     return response.data
   },
 }

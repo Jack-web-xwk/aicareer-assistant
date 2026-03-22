@@ -52,10 +52,10 @@ function HomePage() {
     },
     {
       icon: <LinkOutlined style={{ fontSize: '28px', color: '#f472b6' }} />,
-      title: '目标岗位（链接爬取）',
-      description: '粘贴岗位详情页 URL，服务端爬取并持久化，用于简历优化或职位库。',
+      title: '目标岗位（链接 / 截图）',
+      description: '粘贴详情页 URL 自动爬取，或上传截图由多模态模型抽取岗位信息并入库。',
       action: () => navigate('/target-jobs'),
-      buttonText: '粘贴链接',
+      buttonText: '去添加',
     },
     {
       icon: <FolderOpenOutlined style={{ fontSize: '28px', color: '#a78bfa' }} />,
