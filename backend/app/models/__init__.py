@@ -7,6 +7,7 @@ Models - 数据模型
 from .user import User
 from .resume import Resume
 from .interview import InterviewRecord
+from .saved_job import SavedJob
 from .schemas import (
     # User schemas
     UserCreate,
@@ -31,6 +32,7 @@ __all__ = [
     "User",
     "Resume",
     "InterviewRecord",
+    "SavedJob",
     # User Schemas
     "UserCreate",
     "UserResponse",
