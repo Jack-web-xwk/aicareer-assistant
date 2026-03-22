@@ -7,10 +7,10 @@ Resume Optimizer Agent - 简历优化智能体
 3. 内容匹配
 4. 生成优化简历
 
-支持多种 LLM 提供商：OpenAI, DeepSeek, 智谱GLM, Ollama, Anthropic, Qwen
+支持多种 LLM 提供商：OpenAI, DeepSeek, 智谱GLM, Ollama, Anthropic, Qwen, Bailian
 """
 
-from typing import Any, Dict, List, Optional, TypedDict, Union
+from typing import Any, AsyncGenerator, Dict, List, Optional, TypedDict, Union
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
@@ -18,6 +18,7 @@ from langgraph.graph import StateGraph, END
 
 from app.core.config import settings
 from app.core.llm_provider import LLMFactory, LLMProvider, create_llm
+from app.utils.logger import get_logger
 
 
 class ResumeOptimizerState(TypedDict):
@@ -58,6 +59,7 @@ class ResumeOptimizerAgent:
     - Ollama (本地模型)
     - Anthropic Claude
     - 通义千问 Qwen
+    - 阿里百炼 Bailian
     """
     
     def __init__(
@@ -71,7 +73,7 @@ class ResumeOptimizerAgent:
         初始化智能体
         
         Args:
-            provider: LLM 提供商 (openai/deepseek/zhipu/ollama/anthropic/qwen)
+            provider: LLM 提供商 (openai/deepseek/zhipu/ollama/anthropic/qwen/bailian)
             model: 使用的模型名称
             api_key: API Key (可选，默认从环境变量读取)
             **llm_kwargs: 传递给 LLM 的其他参数
@@ -79,39 +81,73 @@ class ResumeOptimizerAgent:
         self.provider = provider
         self.model = model
         
-        # 使用 LLM Factory 创建简历优化专用 LLM (较低温度，更精准)
-        self.llm: BaseChatModel = LLMFactory.create_for_resume(
-            provider=provider,
-            model=model,
-            api_key=api_key,
-            **llm_kwargs,
-        )
+        # 初始化日志记录器
+        self.logger = get_logger(__name__)
         
-        # 构建图
-        self.graph = self._build_graph()
+        try:
+            # 使用 LLM Factory 创建简历优化专用 LLM (较低温度，更精准)
+            self.llm: BaseChatModel = LLMFactory.create_for_resume(
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                **llm_kwargs,
+            )
+            
+            # 构建图
+            self.graph = self._build_graph()
+            self.logger.info(f"ResumeOptimizerAgent初始化成功，provider={provider}, model={model}")
+        except Exception as e:
+            self.logger.error(f"ResumeOptimizerAgent初始化失败: {str(e)}", exc_info=True)
+            raise
     
     def _build_graph(self) -> StateGraph:
         """构建 LangGraph 状态图"""
-        # 创建状态图
-        workflow = StateGraph(ResumeOptimizerState)
-        
-        # 添加节点
-        workflow.add_node("extract_resume_info", self._extract_resume_info)
-        workflow.add_node("analyze_job_requirements", self._analyze_job_requirements)
-        workflow.add_node("match_content", self._match_content)
-        workflow.add_node("generate_optimized_resume", self._generate_optimized_resume)
-        
-        # 设置入口点
-        workflow.set_entry_point("extract_resume_info")
-        
-        # 添加边（线性流程）
-        workflow.add_edge("extract_resume_info", "analyze_job_requirements")
-        workflow.add_edge("analyze_job_requirements", "match_content")
-        workflow.add_edge("match_content", "generate_optimized_resume")
-        workflow.add_edge("generate_optimized_resume", END)
-        
-        # 编译图
-        return workflow.compile()
+        self.logger.debug("开始构建简历优化状态图")
+        try:
+            # 创建状态图
+            workflow = StateGraph(ResumeOptimizerState)
+            
+            # 添加节点
+            workflow.add_node("extract_resume_info", self._extract_resume_info)
+            workflow.add_node("analyze_job_requirements", self._analyze_job_requirements)
+            workflow.add_node("match_content", self._match_content)
+            workflow.add_node("generate_optimized_resume", self._generate_optimized_resume)
+            
+            # 设置入口点
+            workflow.set_entry_point("extract_resume_info")
+            
+            # 添加边（线性流程）
+            workflow.add_edge("extract_resume_info", "analyze_job_requirements")
+            workflow.add_edge("analyze_job_requirements", "match_content")
+            workflow.add_edge("match_content", "generate_optimized_resume")
+            workflow.add_edge("generate_optimized_resume", END)
+            
+            # 编译图
+            graph = workflow.compile()
+            self.logger.debug("简历优化状态图构建成功")
+            return graph
+        except Exception as e:
+            self.logger.error(f"构建简历优化状态图失败: {str(e)}", exc_info=True)
+            raise
+
+    @staticmethod
+    def _thinking_from_llm_response(response: Any) -> Optional[str]:
+        """
+        从 LangChain Chat 返回的 AIMessage 中提取各厂商可能提供的推理/思考文本。
+        """
+        rk = getattr(response, "additional_kwargs", None) or {}
+        if isinstance(rk, dict):
+            for key in ("reasoning_content", "reasoning", "thinking"):
+                val = rk.get(key)
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+        meta = getattr(response, "response_metadata", None) or {}
+        if isinstance(meta, dict):
+            for key in ("reasoning", "thinking"):
+                val = meta.get(key)
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+        return None
     
     async def _extract_resume_info(self, state: ResumeOptimizerState) -> Dict[str, Any]:
         """
@@ -124,6 +160,7 @@ class ResumeOptimizerAgent:
         - 项目经验
         - 技术栈
         """
+        self.logger.debug("开始提取简历信息")
         system_prompt = """你是一个专业的简历分析师。请从简历文本中提取以下结构化信息，以 JSON 格式返回：
 
 {
@@ -174,7 +211,9 @@ class ResumeOptimizerAgent:
     "languages": ["语言1", "语言2"]
 }
 
-请仔细分析简历内容，提取所有可用信息。如果某项信息不存在，使用 null。"""
+请仔细分析简历内容，提取所有可用信息。如果某项信息不存在，使用 null。
+
+**必须在 JSON 顶层包含字段 `reasoning_notes`（字符串）**：用 2～5 句中文说明你的分析思路、关注了简历中哪些部分、如何归纳结构化信息。"""
 
         human_prompt = f"请分析以下简历并提取信息：\n\n{state['resume_text']}"
         
@@ -189,6 +228,9 @@ class ResumeOptimizerAgent:
             # 解析 JSON 响应
             import json
             content = response.content
+            if not isinstance(content, str):
+                content = str(content)
+            raw_preview = content[:1200]
             # 尝试从响应中提取 JSON
             if "```json" in content:
                 json_str = content.split("```json")[1].split("```")[0].strip()
@@ -198,13 +240,18 @@ class ResumeOptimizerAgent:
                 json_str = content.strip()
             
             extracted_info = json.loads(json_str)
+            reasoning_notes = extracted_info.pop("reasoning_notes", None)
+            extra_thinking = self._thinking_from_llm_response(response)
             
             return {
                 "extracted_info": extracted_info,
                 "current_step": "extract_resume_info",
+                "_reasoning_notes": reasoning_notes or extra_thinking,
+                "_raw_model_preview": raw_preview,
             }
         
         except Exception as e:
+            self.logger.error(f"简历信息提取失败: {str(e)}", exc_info=True)
             return {
                 "error": f"简历信息提取失败: {str(e)}",
                 "current_step": "extract_resume_info",
@@ -219,6 +266,7 @@ class ResumeOptimizerAgent:
         - 必备技能
         - 优先技能
         """
+        self.logger.debug("开始分析岗位需求")
         system_prompt = """你是一个专业的招聘分析师。请从岗位描述中提取以下结构化信息，以 JSON 格式返回：
 
 {
@@ -238,7 +286,9 @@ class ResumeOptimizerAgent:
     "team_culture": "团队文化/工作环境描述（如有）"
 }
 
-请仔细分析岗位描述，准确区分必备和加分条件。"""
+请仔细分析岗位描述，准确区分必备和加分条件。
+
+**必须在 JSON 顶层包含字段 `reasoning_notes`（字符串）**：用 2～5 句中文说明如何从岗位描述中归纳职责、技能与关键词。"""
 
         human_prompt = f"请分析以下岗位描述并提取需求：\n\n{state['job_desc']}"
         
@@ -252,6 +302,9 @@ class ResumeOptimizerAgent:
             
             import json
             content = response.content
+            if not isinstance(content, str):
+                content = str(content)
+            raw_preview = content[:1200]
             if "```json" in content:
                 json_str = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:
@@ -260,13 +313,18 @@ class ResumeOptimizerAgent:
                 json_str = content.strip()
             
             job_requirements = json.loads(json_str)
+            reasoning_notes = job_requirements.pop("reasoning_notes", None)
+            extra_thinking = self._thinking_from_llm_response(response)
             
             return {
                 "job_requirements": job_requirements,
                 "current_step": "analyze_job_requirements",
+                "_reasoning_notes": reasoning_notes or extra_thinking,
+                "_raw_model_preview": raw_preview,
             }
         
         except Exception as e:
+            self.logger.error(f"岗位需求分析失败: {str(e)}", exc_info=True)
             return {
                 "error": f"岗位需求分析失败: {str(e)}",
                 "current_step": "analyze_job_requirements",
@@ -278,6 +336,7 @@ class ResumeOptimizerAgent:
         
         将简历内容与岗位需求进行匹配分析，标记需要强化的部分。
         """
+        self.logger.debug("开始简历与岗位内容匹配分析")
         system_prompt = """你是一个专业的简历优化顾问。请分析候选人简历与目标岗位的匹配程度，以 JSON 格式返回：
 
 {
@@ -297,7 +356,9 @@ class ResumeOptimizerAgent:
     "content_to_highlight": ["应该突出的经历1", "应该突出的项目2"],
     "keywords_to_add": ["应该添加的关键词1", "关键词2"],
     "suggestions": ["优化建议1", "优化建议2"]
-}"""
+}
+
+**必须在 JSON 顶层包含字段 `reasoning_notes`（字符串）**：用 2～5 句中文说明匹配度打分依据、优势与缺口的主要判断逻辑。"""
 
         extracted_info = state.get("extracted_info", {})
         job_requirements = state.get("job_requirements", {})
@@ -322,6 +383,9 @@ class ResumeOptimizerAgent:
             
             import json
             content = response.content
+            if not isinstance(content, str):
+                content = str(content)
+            raw_preview = content[:1200]
             if "```json" in content:
                 json_str = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:
@@ -330,13 +394,18 @@ class ResumeOptimizerAgent:
                 json_str = content.strip()
             
             matched_content = json.loads(json_str)
+            reasoning_notes = matched_content.pop("reasoning_notes", None)
+            extra_thinking = self._thinking_from_llm_response(response)
             
             return {
                 "matched_content": matched_content,
                 "current_step": "match_content",
+                "_reasoning_notes": reasoning_notes or extra_thinking,
+                "_raw_model_preview": raw_preview,
             }
         
         except Exception as e:
+            self.logger.error(f"内容匹配分析失败: {str(e)}", exc_info=True)
             return {
                 "error": f"内容匹配分析失败: {str(e)}",
                 "current_step": "match_content",
@@ -348,6 +417,7 @@ class ResumeOptimizerAgent:
         
         基于匹配分析结果，使用 STAR 法则生成优化后的简历。
         """
+        self.logger.debug("开始生成优化简历")
         system_prompt = """你是一个专业的简历优化专家。请基于提供的分析结果，生成一份优化后的简历。
 
 要求：
@@ -439,10 +509,105 @@ class ResumeOptimizerAgent:
             }
         
         except Exception as e:
+            self.logger.error(f"优化简历生成失败: {str(e)}", exc_info=True)
             return {
                 "error": f"优化简历生成失败: {str(e)}",
                 "current_step": "generate_optimized_resume",
             }
+
+    @staticmethod
+    def _extract_markdown_content(text: str) -> str:
+        """提取模型输出中的 markdown 主体内容。"""
+        if "```markdown" in text:
+            return text.split("```markdown")[1].split("```")[0].strip()
+        if text.startswith("```") and text.endswith("```"):
+            return text[3:-3].strip()
+        return text.strip()
+
+    @staticmethod
+    def _chunk_to_text(chunk: Any) -> str:
+        """将 astream chunk 统一转换为文本。"""
+        content = getattr(chunk, "content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: List[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        parts.append(text)
+            return "".join(parts)
+        return str(content) if content else ""
+
+    async def stream_generate_optimized_resume(
+        self,
+        state: ResumeOptimizerState,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """流式生成优化简历，逐步输出 token。"""
+        extracted_info = state.get("extracted_info", {})
+        job_requirements = state.get("job_requirements", {})
+        matched_content = state.get("matched_content", {})
+
+        system_prompt = """你是一个专业的简历优化专家。请基于提供的分析结果，生成一份优化后的简历。
+
+要求：
+1. 使用 Markdown 格式
+2. 使用 STAR 法则（Situation-Task-Action-Result）描述工作经历和项目
+3. 突出与目标岗位相关的技能和经验
+4. 添加匹配分析中建议的关键词
+5. 量化成果（使用数字和百分比）
+6. 简历结构清晰，重点突出"""
+
+        human_prompt = f"""请基于以下信息生成优化后的简历：
+
+## 原始简历信息
+{extracted_info}
+
+## 目标岗位需求
+{job_requirements}
+
+## 匹配分析结果
+{matched_content}
+
+请生成一份针对该岗位优化的专业简历。"""
+
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=human_prompt),
+        ]
+
+        full_content = ""
+        try:
+            async for chunk in self.llm.astream(messages):
+                delta = self._chunk_to_text(chunk)
+                if not delta:
+                    continue
+                full_content += delta
+                yield {"type": "token", "delta": delta}
+
+            optimized_resume = self._extract_markdown_content(full_content)
+            yield {
+                "type": "done",
+                "optimized_resume": optimized_resume,
+                "current_step": "generate_optimized_resume",
+            }
+        except Exception as e:
+            self.logger.warning(f"流式生成失败，回退到非流式生成: {str(e)}", exc_info=True)
+            try:
+                response = await self.llm.ainvoke(messages)
+                optimized_resume = self._extract_markdown_content(str(response.content))
+                yield {
+                    "type": "done",
+                    "optimized_resume": optimized_resume,
+                    "current_step": "generate_optimized_resume",
+                }
+            except Exception as fallback_error:
+                self.logger.error(f"优化简历生成失败: {str(fallback_error)}", exc_info=True)
+                yield {
+                    "type": "error",
+                    "message": f"优化简历生成失败: {str(fallback_error)}",
+                }
     
     async def run(
         self,
@@ -461,7 +626,45 @@ class ResumeOptimizerAgent:
         Returns:
             优化后的状态（包含所有中间结果和最终简历）
         """
-        initial_state: ResumeOptimizerState = {
+        self.logger.info(f"开始运行简历优化流程，简历长度: {len(resume_text)} 字符，岗位描述长度: {len(job_desc)} 字符")
+        
+        try:
+            initial_state: ResumeOptimizerState = {
+                "resume_text": resume_text,
+                "job_desc": job_desc,
+                "job_url": job_url,
+                "extracted_info": None,
+                "job_requirements": None,
+                "matched_content": None,
+                "optimized_resume": None,
+                "error": None,
+                "current_step": "start",
+            }
+            
+            # 运行图
+            final_state = await self.graph.ainvoke(initial_state)
+            
+            if final_state.get("error"):
+                self.logger.error(
+                    "简历优化流程失败: error=%s",
+                    final_state.get("error"),
+                )
+            else:
+                self.logger.info(f"简历优化流程完成，匹配度评分: {final_state.get('matched_content', {}).get('match_score', '未知')}")
+            
+            return final_state
+        except Exception as e:
+            self.logger.error(f"简历优化流程运行失败: {str(e)}", exc_info=True)
+            raise
+
+    async def run_stream(
+        self,
+        resume_text: str,
+        job_desc: str,
+        job_url: Optional[str] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """流式运行简历优化流程。"""
+        state: ResumeOptimizerState = {
             "resume_text": resume_text,
             "job_desc": job_desc,
             "job_url": job_url,
@@ -472,11 +675,108 @@ class ResumeOptimizerAgent:
             "error": None,
             "current_step": "start",
         }
-        
-        # 运行图
-        final_state = await self.graph.ainvoke(initial_state)
-        
-        return final_state
+
+        try:
+            yield {"type": "start", "message": "开始优化简历"}
+
+            yield {
+                "type": "progress",
+                "step": "extract_resume_info",
+                "node": "extract_resume_info",
+                "message": "正在提取简历信息",
+            }
+            step1 = await self._extract_resume_info(state)
+            rn1 = step1.pop("_reasoning_notes", None)
+            raw1 = step1.pop("_raw_model_preview", None)
+            state.update(step1)
+            if step1.get("error"):
+                yield {"type": "error", "message": step1["error"]}
+                return
+            yield {
+                "type": "node_complete",
+                "node": "extract_resume_info",
+                "message": "简历信息提取完成",
+                "data": {"extracted_info": state.get("extracted_info")},
+                "thinking": rn1,
+                "raw_preview": raw1,
+            }
+
+            yield {
+                "type": "progress",
+                "step": "analyze_job_requirements",
+                "node": "analyze_job_requirements",
+                "message": "正在分析岗位需求",
+            }
+            step2 = await self._analyze_job_requirements(state)
+            rn2 = step2.pop("_reasoning_notes", None)
+            raw2 = step2.pop("_raw_model_preview", None)
+            state.update(step2)
+            if step2.get("error"):
+                yield {"type": "error", "message": step2["error"]}
+                return
+            yield {
+                "type": "node_complete",
+                "node": "analyze_job_requirements",
+                "message": "岗位需求分析完成",
+                "data": {"job_requirements": state.get("job_requirements")},
+                "thinking": rn2,
+                "raw_preview": raw2,
+            }
+
+            yield {
+                "type": "progress",
+                "step": "match_content",
+                "node": "match_content",
+                "message": "正在进行简历匹配分析",
+            }
+            step3 = await self._match_content(state)
+            rn3 = step3.pop("_reasoning_notes", None)
+            raw3 = step3.pop("_raw_model_preview", None)
+            state.update(step3)
+            if step3.get("error"):
+                yield {"type": "error", "message": step3["error"]}
+                return
+            yield {
+                "type": "node_complete",
+                "node": "match_content",
+                "message": "简历匹配分析完成",
+                "data": {"matched_content": state.get("matched_content")},
+                "thinking": rn3,
+                "raw_preview": raw3,
+            }
+
+            yield {
+                "type": "progress",
+                "step": "generate_optimized_resume",
+                "node": "generate_optimized_resume",
+                "message": "正在流式生成优化简历",
+            }
+            async for event in self.stream_generate_optimized_resume(state):
+                if event.get("type") == "done":
+                    state["optimized_resume"] = event.get("optimized_resume")
+                    or_text = state.get("optimized_resume") or ""
+                    yield {
+                        "type": "node_complete",
+                        "node": "generate_optimized_resume",
+                        "message": "优化简历生成完成",
+                        "data": {
+                            "character_count": len(or_text),
+                            "preview_head": or_text[:1200],
+                        },
+                        "thinking": None,
+                        "raw_preview": or_text[:800],
+                    }
+                    yield {
+                        "type": "done",
+                        "optimized_resume": state["optimized_resume"],
+                        "extracted_info": state.get("extracted_info"),
+                        "match_analysis": state.get("matched_content"),
+                    }
+                else:
+                    yield event
+        except Exception as e:
+            self.logger.error(f"流式简历优化流程运行失败: {str(e)}", exc_info=True)
+            yield {"type": "error", "message": f"流式简历优化流程运行失败: {str(e)}"}
 
 
 # 便捷函数
@@ -490,7 +790,7 @@ def create_resume_optimizer_graph(
     创建简历优化智能体实例
     
     Args:
-        provider: LLM 提供商 (openai/deepseek/zhipu/ollama/anthropic/qwen)
+        provider: LLM 提供商 (openai/deepseek/zhipu/ollama/anthropic/qwen/bailian)
         model: 使用的模型名称
         api_key: API Key (可选)
         **llm_kwargs: 传递给 LLM 的其他参数

@@ -8,7 +8,7 @@ Interview Agent - 面试模拟智能体
 4. 文字转语音
 5. 检查是否结束
 
-支持多种 LLM 提供商：OpenAI, DeepSeek, 智谱GLM, Ollama, Anthropic, Qwen
+支持多种 LLM 提供商：OpenAI, DeepSeek, 智谱GLM, Ollama, Anthropic, Qwen, Bailian
 """
 
 from datetime import datetime, timezone
@@ -21,6 +21,7 @@ from langgraph.graph import StateGraph, END
 from app.core.config import settings
 from app.core.llm_provider import LLMFactory, LLMProvider, create_llm
 from app.services.audio_processor import AudioProcessor
+from app.utils.logger import get_logger
 
 
 class InterviewMessage(TypedDict):
@@ -80,6 +81,7 @@ class InterviewAgent:
     - Ollama (本地模型)
     - Anthropic Claude
     - 通义千问 Qwen
+    - 阿里百炼 Bailian
     """
     
     def __init__(
@@ -93,7 +95,7 @@ class InterviewAgent:
         初始化智能体
         
         Args:
-            provider: LLM 提供商 (openai/deepseek/zhipu/ollama/anthropic/qwen)
+            provider: LLM 提供商 (openai/deepseek/zhipu/ollama/anthropic/qwen/bailian)
             model: 使用的模型名称
             api_key: API Key (可选，默认从环境变量读取)
             **llm_kwargs: 传递给 LLM 的其他参数
@@ -101,56 +103,67 @@ class InterviewAgent:
         self.provider = provider
         self.model = model
         
-        # 使用 LLM Factory 创建面试专用 LLM
-        self.llm: BaseChatModel = LLMFactory.create_for_interview(
-            provider=provider,
-            model=model,
-            api_key=api_key,
-            **llm_kwargs,
-        )
+        # 初始化日志记录器
+        self.logger = get_logger(__name__)
         
-        # 音频处理器仍使用 OpenAI (Whisper/TTS)
-        audio_api_key = api_key if provider in [None, LLMProvider.OPENAI, "openai"] else settings.OPENAI_API_KEY
-        self.audio_processor = AudioProcessor(api_key=audio_api_key)
-        
-        # 构建图
-        self.graph = self._build_graph()
+        try:
+            # 使用 LLM Factory 创建面试专用 LLM
+            self.llm: BaseChatModel = LLMFactory.create_for_interview(
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                **llm_kwargs,
+            )
+            
+            # 音频处理器仍使用 OpenAI (Whisper/TTS)
+            audio_api_key = api_key if provider in [None, LLMProvider.OPENAI, "openai"] else settings.OPENAI_API_KEY
+            self.audio_processor = AudioProcessor(api_key=audio_api_key)
+            
+            # 构建图
+            self.graph = self._build_graph()
+        except Exception as e:
+            self.logger.error(f"InterviewAgent初始化失败: {str(e)}", exc_info=True)
+            raise
     
     def _build_graph(self) -> StateGraph:
         """构建 LangGraph 状态图"""
-        workflow = StateGraph(InterviewState)
-        
-        # 添加节点
-        workflow.add_node("init_interview", self._init_interview)
-        workflow.add_node("transcribe_audio", self._transcribe_audio)
-        workflow.add_node("generate_response", self._generate_response)
-        workflow.add_node("synthesize_speech", self._synthesize_speech)
-        workflow.add_node("check_finish", self._check_finish)
-        workflow.add_node("generate_report", self._generate_report)
-        
-        # 设置入口点
-        workflow.set_entry_point("init_interview")
-        
-        # 添加边
-        workflow.add_edge("init_interview", "synthesize_speech")
-        workflow.add_edge("transcribe_audio", "generate_response")
-        workflow.add_edge("generate_response", "synthesize_speech")
-        workflow.add_edge("synthesize_speech", "check_finish")
-        
-        # 条件边：检查是否结束
-        workflow.add_conditional_edges(
-            "check_finish",
-            self._should_finish,
-            {
-                "continue": END,  # 返回等待下一轮输入
-                "finish": "generate_report",
-            }
-        )
-        
-        workflow.add_edge("generate_report", END)
-        
-        # 编译图
-        return workflow.compile()
+        try:
+            workflow = StateGraph(InterviewState)
+            
+            # 添加节点
+            workflow.add_node("init_interview", self._init_interview)
+            workflow.add_node("transcribe_audio", self._transcribe_audio)
+            workflow.add_node("generate_response", self._generate_response)
+            workflow.add_node("synthesize_speech", self._synthesize_speech)
+            workflow.add_node("check_finish", self._check_finish)
+            workflow.add_node("generate_report", self._generate_report)
+            
+            # 设置入口点
+            workflow.set_entry_point("init_interview")
+            
+            # 添加边
+            workflow.add_edge("init_interview", "synthesize_speech")
+            workflow.add_edge("transcribe_audio", "generate_response")
+            workflow.add_edge("generate_response", "synthesize_speech")
+            workflow.add_edge("synthesize_speech", "check_finish")
+            
+            # 条件边：检查是否结束
+            workflow.add_conditional_edges(
+                "check_finish",
+                self._should_finish,
+                {
+                    "continue": END,  # 返回等待下一轮输入
+                    "finish": "generate_report",
+                }
+            )
+            
+            workflow.add_edge("generate_report", END)
+            
+            # 编译图
+            return workflow.compile()
+        except Exception as e:
+            self.logger.error(f"构建状态图失败: {str(e)}", exc_info=True)
+            raise
     
     def _should_finish(self, state: InterviewState) -> str:
         """判断是否结束面试"""
@@ -164,6 +177,7 @@ class InterviewAgent:
         
         设置面试官角色，生成第一个技术问题。
         """
+        self.logger.debug(f"开始初始化面试，岗位: {state['job_role']}, 技术栈: {state['tech_stack']}")
         job_role = state["job_role"]
         tech_stack = state["tech_stack"]
         difficulty = state.get("difficulty_level", "medium")
@@ -219,6 +233,7 @@ class InterviewAgent:
             }
         
         except Exception as e:
+            self.logger.error(f"面试初始化失败: {str(e)}", exc_info=True)
             return {
                 "error": f"面试初始化失败: {str(e)}",
                 "current_step": "init_interview",
@@ -230,6 +245,7 @@ class InterviewAgent:
         
         使用 Whisper 将用户语音转换为文字。
         """
+        self.logger.debug(f"开始语音转文字处理，音频输入长度: {len(state.get('audio_input', '')) if state.get('audio_input') else 0}")
         audio_input = state.get("audio_input")
         
         if not audio_input:
@@ -261,6 +277,7 @@ class InterviewAgent:
             }
         
         except Exception as e:
+            self.logger.error(f"语音转文字失败: {str(e)}", exc_info=True)
             return {
                 "error": f"语音转文字失败: {str(e)}",
                 "current_step": "transcribe_audio",
@@ -272,6 +289,7 @@ class InterviewAgent:
         
         基于对话历史生成面试官的回复（反馈 + 下一个问题）。
         """
+        self.logger.debug(f"开始生成回复，当前问题数: {state.get('question_count', 1)}/{state.get('max_questions', 5)}, 回答长度: {len(state.get('current_answer', ''))}")
         job_role = state.get("job_role", "未知岗位")
         tech_stack = state.get("tech_stack", [])
         conversation_history = state.get("conversation_history", [])
@@ -384,6 +402,7 @@ class InterviewAgent:
             }
         
         except Exception as e:
+            self.logger.error(f"生成回复失败: {str(e)}", exc_info=True)
             return {
                 "error": f"生成回复失败: {str(e)}",
                 "current_step": "generate_response",
@@ -430,6 +449,7 @@ class InterviewAgent:
         
         except Exception as e:
             # TTS 失败不应该中断面试，返回空音频
+            self.logger.warning(f"语音合成失败（非致命）: {str(e)}", exc_info=True)
             return {
                 "audio_output": None,
                 "current_step": "synthesize_speech",
@@ -524,6 +544,7 @@ class InterviewAgent:
         
         except Exception as e:
             # 如果报告生成失败，返回基本报告
+            self.logger.error(f"评估报告生成失败: {str(e)}", exc_info=True)
             return {
                 "report": {
                     "total_score": total_score,
@@ -589,9 +610,14 @@ class InterviewAgent:
             "report": None,
         }
         
-        # 运行初始化
-        result = await self.graph.ainvoke(initial_state)
-        return result
+        try:
+            # 运行初始化
+            result = await self.graph.ainvoke(initial_state)
+            self.logger.info(f"面试已成功启动: {job_role}, 技术栈: {tech_stack}")
+            return result
+        except Exception as e:
+            self.logger.error(f"启动面试失败: {str(e)}", exc_info=True)
+            raise
     
     async def process_answer(
         self,
@@ -634,37 +660,43 @@ class InterviewAgent:
         state["audio_input"] = audio_input
         state["current_step"] = "process_answer"
         
-        # 如果提供了文本输入，直接使用（跳过转录）
-        if text_input:
-            state["current_answer"] = text_input
-            conversation_history = list(state.get("conversation_history", []))
-            conversation_history.append({
-                "role": "user",
-                "content": text_input,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "score": None,
-            })
-            state["conversation_history"] = conversation_history
+        try:
+            # 如果提供了文本输入，直接使用（跳过转录）
+            if text_input:
+                state["current_answer"] = text_input
+                conversation_history = list(state.get("conversation_history", []))
+                conversation_history.append({
+                    "role": "user",
+                    "content": text_input,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "score": None,
+                })
+                state["conversation_history"] = conversation_history
+                
+                # 从 generate_response 开始
+                # 这里我们需要手动执行后续节点
+                state = await self._generate_response(state)
+                state = await self._synthesize_speech(state)
+                state = await self._check_finish(state)
+                
+                if state.get("is_finished"):
+                    state = await self._generate_report(state)
+            else:
+                # 从转录开始
+                state = await self._transcribe_audio(state)
+                state = await self._generate_response(state)
+                state = await self._synthesize_speech(state)
+                state = await self._check_finish(state)
+                
+                if state.get("is_finished"):
+                    state = await self._generate_report(state)
             
-            # 从 generate_response 开始
-            # 这里我们需要手动执行后续节点
-            state = await self._generate_response(state)
-            state = await self._synthesize_speech(state)
-            state = await self._check_finish(state)
-            
-            if state.get("is_finished"):
-                state = await self._generate_report(state)
-        else:
-            # 从转录开始
-            state = await self._transcribe_audio(state)
-            state = await self._generate_response(state)
-            state = await self._synthesize_speech(state)
-            state = await self._check_finish(state)
-            
-            if state.get("is_finished"):
-                state = await self._generate_report(state)
-        
-        return state
+            self.logger.info(f"成功处理用户回答，当前问题数: {state.get('question_count', 0)}")
+            return state
+        except Exception as e:
+            self.logger.error(f"处理用户回答失败: {str(e)}", exc_info=True)
+            state["error"] = f"处理用户回答失败: {str(e)}"
+            return state
 
 
 # 便捷函数
@@ -678,7 +710,7 @@ def create_interview_graph(
     创建面试模拟智能体实例
     
     Args:
-        provider: LLM 提供商 (openai/deepseek/zhipu/ollama/anthropic/qwen)
+        provider: LLM 提供商 (openai/deepseek/zhipu/ollama/anthropic/qwen/bailian)
         model: 使用的模型名称
         api_key: API Key (可选)
         **llm_kwargs: 传递给 LLM 的其他参数
