@@ -261,3 +261,46 @@ class WSControlMessage(BaseModel):
     """WebSocket 控制消息"""
     type: str = "control"
     action: str = Field(..., description="控制动作", pattern="^(start|end|pause|resume)$")
+
+
+# ==================== Learning Schemas ====================
+
+class LearningArticleListItem(BaseModel):
+    """文章列表项（不含正文）"""
+    id: int
+    phase_id: int
+    title: str
+    sort_order: int
+    external_url: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LearningPhaseOut(BaseModel):
+    """阶段（含文章列表）"""
+    id: int
+    title: str
+    subtitle: str
+    sort_order: int
+    articles: List[LearningArticleListItem] = Field(default_factory=list)
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LearningArticleDetail(BaseModel):
+    """文章详情（含正文）"""
+    id: int
+    phase_id: int
+    title: str
+    sort_order: int
+    content_md: str
+    external_url: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True

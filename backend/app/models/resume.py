@@ -15,6 +15,7 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from .user import User
+    from .resume_study_qa_session import ResumeStudyQaSession
 
 
 class ResumeStatus(str, Enum):
@@ -86,6 +87,11 @@ class Resume(Base):
     
     # 关系
     user: Mapped["User"] = relationship("User", back_populates="resumes")
-    
+    study_qa_sessions: Mapped[list["ResumeStudyQaSession"]] = relationship(
+        "ResumeStudyQaSession",
+        back_populates="resume",
+        cascade="all, delete-orphan",
+    )
+
     def __repr__(self) -> str:
         return f"<Resume(id={self.id}, filename={self.original_filename}, status={self.status})>"

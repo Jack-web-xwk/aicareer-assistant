@@ -14,7 +14,9 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.database import create_tables, ensure_sqlite_schema
+from app.core.database import async_session_maker
 from app.services.resume_optimization_job import recover_resume_optimizations_on_startup
+from app.services.learning_seed import seed_learning_if_empty
 from app.core.exception_handlers import register_exception_handlers
 from app.api import router as api_router
 from app.utils.logger import get_logger
@@ -47,6 +49,11 @@ async def lifespan(app: FastAPI):
     logger.info(f"数据目录创建完成: {data_dir}")
     
     await recover_resume_optimizations_on_startup()
+
+    async with async_session_maker() as db:
+        n = await seed_learning_if_empty(db)
+        if n > 0:
+            logger.info("学无止境专栏初始数据已写入，文章数: %d", n)
     
     logger.info(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} started!")
     logger.info(f"📚 API Docs: http://localhost:8000/docs")

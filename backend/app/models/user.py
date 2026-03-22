@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from .resume import Resume
     from .interview import InterviewRecord
     from .saved_job import SavedJob
+    from .resume_study_qa_session import ResumeStudyQaSession
 
 
 class User(Base):
@@ -61,6 +62,11 @@ class User(Base):
     )
     saved_jobs: Mapped[List["SavedJob"]] = relationship(
         "SavedJob",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    study_qa_sessions: Mapped[List["ResumeStudyQaSession"]] = relationship(
+        "ResumeStudyQaSession",
         back_populates="user",
         cascade="all, delete-orphan",
     )

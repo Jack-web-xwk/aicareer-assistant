@@ -109,8 +109,10 @@ class Settings(BaseSettings):
 
     # Resume study QA: LLM-generated interview-prep questions from optimized task context
     RESUME_STUDY_QA_MAX_ITEMS: int = 8
-    # Empty = use LLM_MODEL / provider default
+    # Empty = use LLM_MODEL; any DashScope compatible name when provider is bailian
     RESUME_STUDY_QA_MODEL: str = ""
+    # Empty = use LLM_PROVIDER; set bailian to force 百炼 for study QA only
+    RESUME_STUDY_QA_PROVIDER: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

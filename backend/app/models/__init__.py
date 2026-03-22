@@ -6,8 +6,10 @@ Models - 数据模型
 
 from .user import User
 from .resume import Resume
+from .resume_study_qa_session import ResumeStudyQaSession
 from .interview import InterviewRecord
 from .saved_job import SavedJob
+from .learning import LearningPhase, LearningArticle
 from .schemas import (
     # User schemas
     UserCreate,
@@ -31,8 +33,11 @@ __all__ = [
     # ORM Models
     "User",
     "Resume",
+    "ResumeStudyQaSession",
     "InterviewRecord",
     "SavedJob",
+    "LearningPhase",
+    "LearningArticle",
     # User Schemas
     "UserCreate",
     "UserResponse",

@@ -19,6 +19,7 @@ from app.core.config import settings
 from app.core.database import async_session_maker, get_db
 from app.core.exceptions import FileProcessingException, NotFoundException
 from app.models.resume import Resume, ResumeStatus
+from app.models.resume_study_qa_session import ResumeStudyQaSession
 from app.models.user import User
 from app.models.schemas import (
     ResumeResponse,
@@ -510,15 +511,156 @@ async def unlock_resume_optimization(
     )
 
 
+@router.get("/study-qa-sessions", response_model=SuccessResponse)
+async def list_study_qa_sessions(
+    skip: int = 0,
+    limit: int = 50,
+    resume_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    学习问答生成记录列表（当前用户）；可选按 resume_id 过滤（如取某简历最新一条时 limit=1）。
+    """
+    user = await get_or_create_user(db)
+
+    base = (
+        select(ResumeStudyQaSession, Resume)
+        .join(Resume, ResumeStudyQaSession.resume_id == Resume.id)
+        .where(ResumeStudyQaSession.user_id == user.id)
+    )
+    if resume_id is not None:
+        base = base.where(ResumeStudyQaSession.resume_id == resume_id)
+
+    count_stmt = select(func.count()).select_from(ResumeStudyQaSession).where(
+        ResumeStudyQaSession.user_id == user.id
+    )
+    if resume_id is not None:
+        count_stmt = count_stmt.where(ResumeStudyQaSession.resume_id == resume_id)
+    total_result = await db.execute(count_stmt)
+    total = int(total_result.scalar_one() or 0)
+
+    result = await db.execute(
+        base.order_by(ResumeStudyQaSession.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    rows = result.all()
+
+    items_out = []
+    for sess, res in rows:
+        preview = ""
+        try:
+            arr = json.loads(sess.items_json or "[]")
+            if isinstance(arr, list) and arr:
+                q = arr[0].get("question") if isinstance(arr[0], dict) else ""
+                preview = (q or "")[:120]
+                if len(q or "") > 120:
+                    preview += "…"
+        except (json.JSONDecodeError, TypeError):
+            pass
+        items_out.append(
+            {
+                "id": sess.id,
+                "resume_id": sess.resume_id,
+                "original_filename": res.original_filename,
+                "target_job_title": res.target_job_title,
+                "item_count": sess.item_count,
+                "preview": preview or None,
+                "created_at": sess.created_at.isoformat(),
+            }
+        )
+
+    return SuccessResponse(
+        success=True,
+        message="OK",
+        data={
+            "items": items_out,
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+        },
+    )
+
+
+@router.get("/study-qa-sessions/{session_id}", response_model=SuccessResponse)
+async def get_study_qa_session(
+    session_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """单条学习问答详情（含完整 items 与关联简历摘要）。"""
+    user = await get_or_create_user(db)
+    result = await db.execute(
+        select(ResumeStudyQaSession, Resume)
+        .join(Resume, ResumeStudyQaSession.resume_id == Resume.id)
+        .where(
+            ResumeStudyQaSession.id == session_id,
+            ResumeStudyQaSession.user_id == user.id,
+        )
+    )
+    row = result.first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Study QA session not found")
+    sess, res = row
+    try:
+        items = json.loads(sess.items_json or "[]")
+        if not isinstance(items, list):
+            items = []
+    except json.JSONDecodeError:
+        items = []
+
+    return SuccessResponse(
+        success=True,
+        message="OK",
+        data={
+            "id": sess.id,
+            "resume_id": res.id,
+            "original_filename": res.original_filename,
+            "file_type": res.file_type,
+            "target_job_title": res.target_job_title,
+            "target_job_url": res.target_job_url,
+            "status": res.status.value,
+            "items": items,
+            "item_count": sess.item_count,
+            "created_at": sess.created_at.isoformat(),
+        },
+    )
+
+
+@router.delete("/study-qa-sessions/{session_id}", response_model=SuccessResponse)
+async def delete_study_qa_session(
+    session_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    user = await get_or_create_user(db)
+    result = await db.execute(
+        select(ResumeStudyQaSession).where(
+            ResumeStudyQaSession.id == session_id,
+            ResumeStudyQaSession.user_id == user.id,
+        )
+    )
+    sess = result.scalar_one_or_none()
+    if not sess:
+        raise HTTPException(status_code=404, detail="Study QA session not found")
+    await db.delete(sess)
+    return SuccessResponse(
+        success=True,
+        message="已删除",
+        data={"id": session_id},
+    )
+
+
 @router.post("/{resume_id}/study-qa", response_model=SuccessResponse)
 async def generate_resume_study_qa_endpoint(
     resume_id: int,
     db: AsyncSession = Depends(get_db),
 ):
     """
-    根据已完成优化的简历任务（岗位描述、匹配分析、优化稿）生成学习/面试准备问答。
+    根据已完成优化的简历任务（岗位描述、匹配分析、优化稿）生成学习/面试准备问答，并持久化。
     """
-    result = await db.execute(select(Resume).where(Resume.id == resume_id))
+    user = await get_or_create_user(db)
+    result = await db.execute(
+        select(Resume).where(Resume.id == resume_id, Resume.user_id == user.id)
+    )
     resume = result.scalar_one_or_none()
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
@@ -564,11 +706,26 @@ async def generate_resume_study_qa_endpoint(
             detail="生成学习问答失败，请稍后重试",
         ) from e
 
+    payload_items = [i.model_dump() for i in items]
+    row = ResumeStudyQaSession(
+        user_id=user.id,
+        resume_id=resume.id,
+        items_json=json.dumps(payload_items, ensure_ascii=False),
+        item_count=len(items),
+    )
+    db.add(row)
+    await db.flush()
+    await db.refresh(row)
+
     return SuccessResponse(
         success=True,
-        message="学习问答已生成",
+        message="学习问答已生成并已保存",
         data={
-            "items": [i.model_dump() for i in items],
+            "session_id": row.id,
+            "resume_id": resume.id,
+            "items": payload_items,
+            "item_count": row.item_count,
+            "created_at": row.created_at.isoformat(),
         },
     )
 

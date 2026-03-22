@@ -98,7 +98,12 @@ async def generate_resume_study_qa(
     )
 
     model = settings.RESUME_STUDY_QA_MODEL.strip() or None
-    llm = LLMFactory.create_for_resume(model=model, temperature=0.4)
+    qa_provider = settings.RESUME_STUDY_QA_PROVIDER.strip() or "bailian"
+    llm = LLMFactory.create_for_resume(
+        provider=qa_provider or None,
+        model=model,
+        temperature=0.4,
+    )
     response = await llm.ainvoke([system, user])
     content = getattr(response, "content", None) or str(response)
     if not isinstance(content, str):

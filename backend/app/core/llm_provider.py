@@ -285,10 +285,11 @@ class LLMFactory:
         
         面试场景特点：需要更自然的对话、适度的创造性
         """
+        temperature = kwargs.pop("temperature", 0.7)
         return LLMFactory.create(
             provider=provider,
             model=model,
-            temperature=0.7,
+            temperature=temperature,
             **kwargs,
         )
     
@@ -296,6 +297,7 @@ class LLMFactory:
     def create_for_resume(
         provider: Optional[Union[LLMProvider, str]] = None,
         model: Optional[str] = None,
+        temperature: float = 0.3,
         **kwargs: Any,
     ) -> BaseChatModel:
         """
@@ -303,10 +305,11 @@ class LLMFactory:
         
         简历场景特点：需要更精准的信息提取、较低的创造性
         """
+        kwargs.pop("temperature", None)  # 避免与显式参数重复传入 create
         return LLMFactory.create(
             provider=provider,
             model=model,
-            temperature=0.3,
+            temperature=temperature,
             **kwargs,
         )
     
