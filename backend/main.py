@@ -13,7 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
-from app.core.database import create_tables
+from app.core.database import create_tables, ensure_sqlite_schema
+from app.core.exception_handlers import register_exception_handlers
 from app.api import router as api_router
 from app.utils.logger import get_logger
 
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI):
     # Startup: 创建数据库表
     logger.info("开始初始化数据库表")
     await create_tables()
+    await ensure_sqlite_schema()
     logger.info("数据库表初始化完成")
     
     # Startup: 创建上传目录
@@ -70,6 +72,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 全局异常日志（所有路由未捕获异常、HTTPException、422 均落盘）
+register_exception_handlers(app)
 
 # 注册 API 路由
 app.include_router(api_router, prefix="/api")
