@@ -80,9 +80,14 @@ class ExtractedResumeInfo(BaseModel):
 
 
 class JobRequirements(BaseModel):
-    """岗位需求信息"""
+    """岗位需求信息（爬取/解析结果，用于优化与历史展示）"""
     title: str
     company: Optional[str] = None
+    salary: Optional[str] = None
+    location: Optional[str] = None
+    industry: Optional[str] = None
+    company_scale: Optional[str] = None
+    financing_stage: Optional[str] = None
     responsibilities: List[str] = []
     required_skills: List[str] = []
     preferred_skills: List[str] = []

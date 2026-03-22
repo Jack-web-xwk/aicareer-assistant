@@ -59,6 +59,8 @@ class Resume(Base):
     target_job_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     target_job_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     job_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 爬取到的岗位结构化快照（JSON），含公司/薪资/地点/技能等，供历史结果展示
+    job_snapshot: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     # 优化结果
     optimized_resume: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Markdown

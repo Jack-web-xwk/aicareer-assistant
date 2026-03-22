@@ -8,11 +8,11 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, BackgroundTasks
-from fastapi.responses import FileResponse, Response
-from sqlalchemy import select
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -37,6 +37,39 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+def _job_desc_text_from_requirements(job_info: JobRequirements, job_url: str) -> str:
+    """将爬取结果格式化为给 LLM 的岗位说明文本。"""
+    lines = [
+        f"岗位名称：{job_info.title}",
+        f"公司：{job_info.company or '未知'}",
+        f"应聘岗位链接：{job_url}",
+        f"薪资：{job_info.salary or '未标注'}",
+        f"工作地点：{job_info.location or '未标注'}",
+    ]
+    if job_info.industry:
+        lines.append(f"行业：{job_info.industry}")
+    if job_info.company_scale:
+        lines.append(f"公司规模：{job_info.company_scale}")
+    if job_info.financing_stage:
+        lines.append(f"融资阶段：{job_info.financing_stage}")
+    lines.append("职责：")
+    lines.extend("- " + r for r in job_info.responsibilities)
+    lines.append("必备技能：")
+    lines.extend("- " + s for s in job_info.required_skills)
+    lines.append("加分技能：")
+    lines.extend("- " + s for s in job_info.preferred_skills)
+    lines.append(f"经验要求：{job_info.experience_years or '未指定'}")
+    lines.append(f"学历要求：{job_info.education_requirement or '未指定'}")
+    return "\n".join(lines)
+
+
+def _job_snapshot_json(job_info: JobRequirements, job_url: str) -> str:
+    """结构化快照，供历史结果展示。"""
+    d = job_info.model_dump()
+    d["source_url"] = job_url
+    return json.dumps(d, ensure_ascii=False)
 
 
 async def get_or_create_user(db: AsyncSession, email: str = "default@example.com") -> User:
@@ -119,7 +152,7 @@ async def upload_resume(
             parse_status = ResumeStatus.PARSED
             logger.info("简历解析成功")
         except Exception as e:
-            logger.error(f"简历解析失败: {str(e)}")
+            logger.error(f"简历解析失败: {str(e)}", exc_info=True)
             resume_text = None
             parse_status = ResumeStatus.FAILED
         
@@ -153,7 +186,7 @@ async def upload_resume(
         )
     
     except Exception as e:
-        logger.error(f"上传简历失败: {str(e)}")
+        logger.error(f"上传简历失败: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to upload resume: {str(e)}",
@@ -211,26 +244,20 @@ async def optimize_resume(
         try:
             logger.info(f"开始爬取岗位信息: {job_url}")
             job_info = scrape_job_info(job_url)
-            job_desc = f"""
-岗位名称：{job_info.title}
-公司：{job_info.company or '未知'}
-职责：
-{chr(10).join('- ' + r for r in job_info.responsibilities)}
-必备技能：
-{chr(10).join('- ' + s for s in job_info.required_skills)}
-加分技能：
-{chr(10).join('- ' + s for s in job_info.preferred_skills)}
-经验要求：{job_info.experience_years or '未指定'}
-学历要求：{job_info.education_requirement or '未指定'}
-"""
+            job_desc = _job_desc_text_from_requirements(job_info, job_url)
             resume.target_job_title = job_info.title
             resume.job_description = job_desc
+            resume.job_snapshot = _job_snapshot_json(job_info, job_url)
             logger.info(f"岗位信息爬取成功: {job_info.title}")
         except Exception as e:
             # 如果爬取失败，使用 URL 作为描述
-            logger.error(f"岗位信息爬取失败: {str(e)}")
+            logger.error(f"岗位信息爬取失败: {str(e)}", exc_info=True)
             job_desc = f"目标岗位链接：{job_url}"
             resume.job_description = job_desc
+            resume.job_snapshot = json.dumps(
+                {"source_url": job_url, "scrape_error": str(e)},
+                ensure_ascii=False,
+            )
         
         # 运行简历优化智能体
         logger.info("开始运行简历优化智能体")
@@ -247,7 +274,11 @@ async def optimize_resume(
             error_msg = result_state["error"]
             resume.status = ResumeStatus.FAILED
             resume.error_message = error_msg
-            logger.error(f"简历优化失败: {error_msg}")
+            logger.error(
+                "简历优化失败: resume_id=%s, error=%s",
+                resume_id,
+                error_msg,
+            )
         else:
             resume.status = ResumeStatus.OPTIMIZED
             resume.extracted_info = json.dumps(
@@ -278,7 +309,7 @@ async def optimize_resume(
         )
     
     except Exception as e:
-        logger.error(f"优化简历失败: {str(e)}")
+        logger.error(f"优化简历失败: {str(e)}", exc_info=True)
         resume.status = ResumeStatus.FAILED
         resume.error_message = str(e)
         await db.commit()
@@ -287,6 +318,235 @@ async def optimize_resume(
             status_code=500,
             detail=f"Failed to optimize resume: {str(e)}",
         )
+
+
+@router.post("/optimize/{resume_id}/stream")
+async def optimize_resume_stream(
+    resume_id: int,
+    target_job_url: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """流式优化简历（SSE）。"""
+    logger.info(f"开始流式优化简历，resume_id={resume_id}")
+
+    result = await db.execute(select(Resume).where(Resume.id == resume_id))
+    resume = result.scalar_one_or_none()
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+
+    job_url = target_job_url or resume.target_job_url
+    if not job_url:
+        raise HTTPException(status_code=400, detail="Target job URL is required for optimization")
+    if not resume.original_text:
+        raise HTTPException(status_code=400, detail="Resume has not been parsed. Please re-upload.")
+
+    resume.status = ResumeStatus.OPTIMIZING
+    resume.target_job_url = job_url
+    await db.commit()
+
+    try:
+        job_info = scrape_job_info(job_url)
+        job_desc = _job_desc_text_from_requirements(job_info, job_url)
+        resume.target_job_title = job_info.title
+        resume.job_description = job_desc
+        resume.job_snapshot = _job_snapshot_json(job_info, job_url)
+    except Exception as e:
+        logger.error(
+            f"流式优化岗位信息爬取失败，resume_id={resume_id}, url={job_url}, error={str(e)}",
+            exc_info=True,
+        )
+        job_desc = f"目标岗位链接：{job_url}"
+        resume.job_description = job_desc
+        resume.job_snapshot = json.dumps(
+            {"source_url": job_url, "scrape_error": str(e)},
+            ensure_ascii=False,
+        )
+    await db.commit()
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        agent = ResumeOptimizerAgent()
+        final_extracted_info = None
+        final_match_analysis = None
+        final_optimized_resume = ""
+        has_error = False
+
+        try:
+            async for event in agent.run_stream(
+                resume_text=resume.original_text or "",
+                job_desc=job_desc,
+                job_url=job_url,
+            ):
+                event_type = event.get("type")
+                if event_type == "done":
+                    final_extracted_info = event.get("extracted_info")
+                    final_match_analysis = event.get("match_analysis")
+                    final_optimized_resume = event.get("optimized_resume", "")
+                elif event_type == "error":
+                    has_error = True
+                    resume.status = ResumeStatus.FAILED
+                    resume.error_message = event.get("message", "Unknown stream error")
+                    await db.commit()
+                    logger.error(
+                        "流式简历优化失败: resume_id=%s, error=%s",
+                        resume_id,
+                        resume.error_message,
+                    )
+
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+            if not has_error:
+                resume.status = ResumeStatus.OPTIMIZED
+                resume.extracted_info = json.dumps(final_extracted_info or {}, ensure_ascii=False)
+                resume.match_analysis = json.dumps(final_match_analysis or {}, ensure_ascii=False)
+                resume.optimized_resume = final_optimized_resume
+                await db.commit()
+                logger.info(f"流式简历优化完成，resume_id={resume_id}")
+        except Exception as e:
+            logger.error(
+                f"流式简历优化异常，resume_id={resume_id}, error={str(e)}",
+                exc_info=True,
+            )
+            resume.status = ResumeStatus.FAILED
+            resume.error_message = str(e)
+            await db.commit()
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/history", response_model=SuccessResponse)
+async def list_optimization_history(
+    skip: int = 0,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    简历任务总览：返回当前用户全部简历记录（上传、解析、待优化、优化中、已完成、失败）。
+    按「优化中 > 解析中 > 上传 > 待优化 > 失败 > 已完成」优先级 + 更新时间倒序。
+    不含完整正文，详情请用 GET /resume/{id}。
+    """
+    user = await get_or_create_user(db)
+
+    count_result = await db.execute(
+        select(func.count())
+        .select_from(Resume)
+        .where(Resume.user_id == user.id)
+    )
+    total = int(count_result.scalar_one() or 0)
+
+    priority = case(
+        (Resume.status == ResumeStatus.OPTIMIZING, 0),
+        (Resume.status == ResumeStatus.PARSING, 1),
+        (Resume.status == ResumeStatus.UPLOADED, 2),
+        (Resume.status == ResumeStatus.PARSED, 3),
+        (Resume.status == ResumeStatus.FAILED, 4),
+        else_=5,
+    )
+
+    result = await db.execute(
+        select(Resume)
+        .where(Resume.user_id == user.id)
+        .order_by(priority, Resume.updated_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    rows = result.scalars().all()
+
+    items = []
+    for r in rows:
+        match_score: Optional[int] = None
+        if r.match_analysis:
+            try:
+                ma = json.loads(r.match_analysis)
+                if isinstance(ma, dict) and "match_score" in ma:
+                    match_score = int(ma["match_score"])
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+        opt = r.optimized_resume or ""
+        orig = r.original_text or ""
+        if opt:
+            preview = opt[:280].replace("\n", " ")
+            if len(opt) > 280:
+                preview += "…"
+        elif orig:
+            preview = orig[:280].replace("\n", " ")
+            if len(orig) > 280:
+                preview += "…"
+        else:
+            preview = None
+        job_snapshot = None
+        if r.job_snapshot:
+            try:
+                job_snapshot = json.loads(r.job_snapshot)
+            except (json.JSONDecodeError, TypeError):
+                job_snapshot = None
+        items.append(
+            {
+                "id": r.id,
+                "original_filename": r.original_filename,
+                "file_type": r.file_type,
+                "status": r.status.value,
+                "target_job_title": r.target_job_title,
+                "target_job_url": r.target_job_url,
+                "match_score": match_score,
+                "preview": preview or None,
+                "job_snapshot": job_snapshot,
+                "error_message": r.error_message,
+                "created_at": r.created_at.isoformat(),
+                "updated_at": r.updated_at.isoformat(),
+            }
+        )
+
+    return SuccessResponse(
+        success=True,
+        message="Optimization history retrieved successfully",
+        data={
+            "items": items,
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+        },
+    )
+
+
+@router.post("/{resume_id}/unlock-optimization", response_model=SuccessResponse)
+async def unlock_resume_optimization(
+    resume_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    将卡在「优化中」的任务恢复为「已解析」，便于重新发起流式优化（例如页面关闭导致 SSE 中断）。
+    仅允许操作属于当前默认用户的简历。
+    """
+    user = await get_or_create_user(db)
+    result = await db.execute(
+        select(Resume).where(Resume.id == resume_id, Resume.user_id == user.id)
+    )
+    resume = result.scalar_one_or_none()
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    if resume.status != ResumeStatus.OPTIMIZING:
+        raise HTTPException(
+            status_code=400,
+            detail="当前任务不在「优化中」状态，无需解除",
+        )
+    resume.status = ResumeStatus.PARSED
+    resume.error_message = None
+    await db.commit()
+    await db.refresh(resume)
+    return SuccessResponse(
+        success=True,
+        message="已解除优化中状态，可重新发起优化",
+        data={"id": resume.id, "status": resume.status.value},
+    )
 
 
 @router.get("/{resume_id}", response_model=SuccessResponse)
@@ -320,6 +580,9 @@ async def get_resume(
             "extracted_info": json.loads(resume.extracted_info) if resume.extracted_info else None,
             "match_analysis": json.loads(resume.match_analysis) if resume.match_analysis else None,
             "optimized_resume": resume.optimized_resume,
+            "job_description": resume.job_description,
+            "job_snapshot": json.loads(resume.job_snapshot) if resume.job_snapshot else None,
+            "error_message": resume.error_message,
             "created_at": resume.created_at.isoformat(),
             "updated_at": resume.updated_at.isoformat(),
         },
@@ -382,7 +645,12 @@ async def list_resumes(
     """
     logger.info(f"获取简历列表，跳过: {skip}, 限制: {limit}")
     user = await get_or_create_user(db)
-    
+
+    count_result = await db.execute(
+        select(func.count()).select_from(Resume).where(Resume.user_id == user.id)
+    )
+    total = int(count_result.scalar_one() or 0)
+
     result = await db.execute(
         select(Resume)
         .where(Resume.user_id == user.id)
@@ -391,7 +659,7 @@ async def list_resumes(
         .limit(limit)
     )
     resumes = result.scalars().all()
-    
+
     logger.debug(f"获取简历列表成功，数量: {len(resumes)}")
     return SuccessResponse(
         success=True,
@@ -404,11 +672,14 @@ async def list_resumes(
                     "file_type": r.file_type,
                     "status": r.status.value,
                     "target_job_title": r.target_job_title,
+                    "target_job_url": r.target_job_url,
+                    "error_message": r.error_message,
                     "created_at": r.created_at.isoformat(),
+                    "updated_at": r.updated_at.isoformat(),
                 }
                 for r in resumes
             ],
-            "total": len(resumes),
+            "total": total,
             "skip": skip,
             "limit": limit,
         },
@@ -438,7 +709,7 @@ async def delete_resume(
             file_path.unlink()
             logger.debug(f"删除文件成功: {file_path}")
     except Exception as e:
-        logger.warning(f"删除文件失败: {str(e)}")
+        logger.warning(f"删除文件失败: {str(e)}", exc_info=True)
     
     # 删除数据库记录
     await db.delete(resume)

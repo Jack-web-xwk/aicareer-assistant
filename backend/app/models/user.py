@@ -15,6 +15,7 @@ from app.core.database import Base
 if TYPE_CHECKING:
     from .resume import Resume
     from .interview import InterviewRecord
+    from .saved_job import SavedJob
 
 
 class User(Base):
@@ -58,6 +59,11 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
-    
+    saved_jobs: Mapped[List["SavedJob"]] = relationship(
+        "SavedJob",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
     def __repr__(self) -> str:
         return f"<User(id={self.id}, email={self.email})>"
