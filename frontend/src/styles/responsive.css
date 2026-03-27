@@ -1,0 +1,482 @@
+/**
+ * Pod-C: 响应式设计样式
+ * 断点定义：
+ * - Mobile: < 768px
+ * - Tablet: 768px - 1024px
+ * - Desktop: > 1024px
+ */
+
+/* ============================================================================
+   响应式断点 Mixins（供其他文件参考）
+   ============================================================================ */
+
+/*
+Mobile-first approach:
+
+@media (min-width: 768px) {
+  // Tablet styles
+}
+
+@media (min-width: 1024px) {
+  // Desktop styles
+}
+*/
+
+/* ============================================================================
+   通用容器样式
+   ============================================================================ */
+
+/* 主容器最大宽度限制 */
+.page-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+@media (min-width: 768px) {
+  .page-container {
+    padding: 24px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .page-container {
+    padding: 32px;
+  }
+}
+
+/* ============================================================================
+   卡片组件响应式
+   ============================================================================ */
+
+/* 移动端：单列布局，简化内边距 */
+@media (max-width: 767px) {
+  .ant-card {
+    border-radius: 8px !important;
+  }
+
+  .ant-card-body {
+    padding: 12px !important;
+  }
+
+  /* 统计卡片堆叠 */
+  .ant-statistic {
+    text-align: center;
+  }
+
+  .ant-statistic-title {
+    font-size: 12px;
+  }
+
+  .ant-statistic-content {
+    font-size: 20px;
+  }
+}
+
+/* 平板端：双列布局 */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .ant-card-body {
+    padding: 16px !important;
+  }
+
+  .ant-statistic-title {
+    font-size: 14px;
+  }
+
+  .ant-statistic-content {
+    font-size: 24px;
+  }
+}
+
+/* 桌面端：三列布局，完整功能 */
+@media (min-width: 1024px) {
+  .ant-card-body {
+    padding: 20px !important;
+  }
+
+  .ant-statistic-title {
+    font-size: 14px;
+  }
+
+  .ant-statistic-content {
+    font-size: 28px;
+  }
+}
+
+/* ============================================================================
+   图表响应式
+   ============================================================================ */
+
+/* 移动端：简化图表 */
+@media (max-width: 767px) {
+  .recharts-wrapper {
+    font-size: 10px !important;
+  }
+
+  .recharts-text {
+    font-size: 10px !important;
+  }
+
+  /* 隐藏图例以节省空间 */
+  .recharts-legend-wrapper {
+    display: none;
+  }
+
+  /* 雷达图缩小 */
+  .radar-chart-container {
+    height: 200px !important;
+  }
+
+  /* 热力图简化 */
+  .heatmap-day {
+    width: 8px !important;
+    height: 8px !important;
+  }
+}
+
+/* 平板端：中等尺寸 */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .recharts-wrapper {
+    font-size: 12px !important;
+  }
+
+  .recharts-text {
+    font-size: 12px !important;
+  }
+
+  .radar-chart-container {
+    height: 250px !important;
+  }
+
+  .heatmap-day {
+    width: 12px !important;
+    height: 12px !important;
+  }
+}
+
+/* 桌面端：完整尺寸 */
+@media (min-width: 1024px) {
+  .recharts-wrapper {
+    font-size: 14px !important;
+  }
+
+  .recharts-text {
+    font-size: 14px !important;
+  }
+
+  .radar-chart-container {
+    height: 300px !important;
+  }
+
+  .heatmap-day {
+    width: 14px !important;
+    height: 14px !important;
+  }
+}
+
+/* ============================================================================
+   网格布局响应式
+   ============================================================================ */
+
+/* Grid 系统适配 */
+.responsive-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 768px) {
+  .responsive-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .responsive-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* 维度卡片网格 */
+.dimension-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 576px) {
+  .dimension-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 992px) {
+  .dimension-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* ============================================================================
+   时间轴和列表响应式
+   ============================================================================ */
+
+/* 移动端：简化时间轴 */
+@media (max-width: 767px) {
+  .ant-timeline-item-content {
+    font-size: 13px;
+  }
+
+  .ant-timeline-item-head {
+    width: 12px !important;
+    height: 12px !important;
+  }
+
+  /* 列表项简化 */
+  .ant-list-item {
+    padding: 12px 0 !important;
+  }
+
+  .ant-list-item-meta-title {
+    font-size: 14px;
+  }
+
+  .ant-list-item-meta-description {
+    font-size: 12px;
+  }
+}
+
+/* 平板端及以上：完整显示 */
+@media (min-width: 768px) {
+  .ant-timeline-item-content {
+    font-size: 14px;
+  }
+
+  .ant-timeline-item-head {
+    width: 14px !important;
+    height: 14px !important;
+  }
+
+  .ant-list-item {
+    padding: 16px 0 !important;
+  }
+
+  .ant-list-item-meta-title {
+    font-size: 15px;
+  }
+
+  .ant-list-item-meta-description {
+    font-size: 13px;
+  }
+}
+
+/* ============================================================================
+   按钮和操作响应式
+   ============================================================================ */
+
+/* 移动端：全宽按钮 */
+@media (max-width: 767px) {
+  .responsive-button-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .responsive-button-group .ant-btn {
+    width: 100%;
+  }
+
+  /* Space 组件改为垂直布局 */
+  .mobile-vertical {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+}
+
+/* 平板端及以上：水平布局 */
+@media (min-width: 768px) {
+  .responsive-button-group {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+  }
+
+  .responsive-button-group .ant-btn {
+    width: auto;
+  }
+
+  .mobile-vertical {
+    flex-direction: row !important;
+    align-items: center !important;
+  }
+}
+
+/* ============================================================================
+   文字大小响应式
+   ============================================================================ */
+
+/* 标题文字大小 */
+.responsive-title {
+  font-size: 18px;
+}
+
+@media (min-width: 768px) {
+  .responsive-title {
+    font-size: 22px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .responsive-title {
+    font-size: 24px;
+  }
+}
+
+/* 正文字体大小 */
+.responsive-text {
+  font-size: 13px;
+}
+
+@media (min-width: 768px) {
+  .responsive-text {
+    font-size: 14px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .responsive-text {
+    font-size: 15px;
+  }
+}
+
+/* ============================================================================
+   导航和标签页响应式
+   ============================================================================ */
+
+/* 移动端：标签页滚动 */
+@media (max-width: 767px) {
+  .ant-tabs-nav {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .ant-tabs-tab {
+    padding: 8px 12px !important;
+    font-size: 13px !important;
+  }
+
+  /* 隐藏多余的标签 */
+  .ant-tabs-nav-operations-hidden {
+    display: none;
+  }
+}
+
+/* 平板端及以上：正常显示 */
+@media (min-width: 768px) {
+  .ant-tabs-nav {
+    overflow-x: visible;
+  }
+
+  .ant-tabs-tab {
+    padding: 12px 16px !important;
+    font-size: 14px !important;
+  }
+}
+
+/* ============================================================================
+   工具类
+   ============================================================================ */
+
+/* 显示/隐藏控制 */
+.hide-on-mobile {
+  display: none;
+}
+
+.hide-on-tablet {
+  display: none;
+}
+
+.show-on-mobile {
+  display: block;
+}
+
+@media (min-width: 768px) {
+  .hide-on-mobile {
+    display: block;
+  }
+
+  .show-on-mobile {
+    display: none;
+  }
+
+  .hide-on-tablet {
+    display: none;
+  }
+}
+
+@media (min-width: 1024px) {
+  .hide-on-tablet {
+    display: block;
+  }
+}
+
+/* Flex 布局响应式 */
+.responsive-flex {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+@media (min-width: 768px) {
+  .responsive-flex {
+    flex-direction: row;
+    gap: 16px;
+  }
+}
+
+/* Space 间距调整 */
+.responsive-space {
+  margin: -8px;
+}
+
+.responsive-space > * {
+  margin: 8px;
+}
+
+@media (min-width: 768px) {
+  .responsive-space {
+    margin: -12px;
+  }
+
+  .responsive-space > * {
+    margin: 12px;
+  }
+}
+
+/* ============================================================================
+   动画性能优化
+   ============================================================================ */
+
+/* 移动端减少动画 */
+@media (max-width: 767px) {
+  .motion-reduce-mobile {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 所有设备上的加载状态优化 */
+.loading-skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}

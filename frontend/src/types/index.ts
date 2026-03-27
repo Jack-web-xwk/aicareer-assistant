@@ -410,3 +410,169 @@ export interface ResumeUploadListItem {
   created_at: string
   updated_at: string
 }
+
+// ============================================================================
+// Pod-C: Interview Prep & UX Types
+// ============================================================================
+
+/** 面试准备模式 */
+export type PrepMode = 'practice' | 'mock' | 'challenge'
+
+/** 能力维度类型（5 个评估维度） */
+export type DimensionType = 
+  | 'technical_skill'      // 技术能力
+  | 'communication'        // 沟通能力
+  | 'problem_solving'      // 问题解决
+  | 'project_experience'   // 项目经验
+  | 'cultural_fit'         // 文化匹配
+
+/** 难度级别 */
+export type DifficultyLevel = 'easy' | 'medium' | 'hard'
+
+/** 题目信息 */
+export interface InterviewQuestion {
+  id: number
+  content: string
+  dimension: DimensionType
+  difficulty: DifficultyLevel
+  tags: string[]
+  expected_duration_seconds: number
+  tips?: string
+}
+
+/** 准备答案提交 */
+export interface PrepAnswerRequest {
+  session_id: string
+  question_id: number
+  text_answer: string
+  audio_base64?: string
+  duration_seconds: number
+}
+
+/** 准备答案响应 */
+export interface PrepAnswerResponse {
+  success: boolean
+  feedback: string
+  score: number
+  suggestions: string[]
+}
+
+/** 回放会话信息 */
+export interface ReplaySession {
+  session_id: string
+  job_role: string
+  tech_stack: string[]
+  started_at: string
+  ended_at: string
+  total_score: number
+  dimension_scores: Record<DimensionType, number>
+  conversation_history: ReplayMessage[]
+  comparison_data?: ComparisonView
+}
+
+/** 回放中的消息 */
+export interface ReplayMessage {
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: string
+  audio_url?: string
+  dimension?: DimensionType
+  score?: number
+  feedback?: string
+}
+
+/** A/B 答案对比视图 */
+export interface ComparisonView {
+  answer_a: {
+    content: string
+    audio_url?: string
+    duration_seconds: number
+    score: number
+    feedback: string
+  }
+  answer_b: {
+    content: string
+    audio_url?: string
+    duration_seconds: number
+    score: number
+    feedback: string
+  }
+  comparison_summary: string
+  improvement_suggestions: string[]
+}
+
+/** 进度统计数据 */
+export interface ProgressStats {
+  user_id: string
+  timeframe: 'week' | 'month' | 'quarter' | 'year'
+  total_interviews: number
+  average_score: number
+  best_dimension: DimensionType
+  weakest_dimension: DimensionType
+  dimension_averages: Record<DimensionType, number>
+  activity_days: number
+  streak_days: number
+}
+
+/** 趋势数据点 */
+export interface TrendDataPoint {
+  date: string
+  score: number
+  interview_count: number
+  dimension_scores?: Partial<Record<DimensionType, number>>
+}
+
+/** 热力图数据 */
+export interface HeatmapData {
+  month: string  // YYYY-MM
+  days: Array<{
+    date: string  // YYYY-MM-DD
+    count: number
+    intensity: number  // 0-1
+  }>
+  total_practice_days: number
+  max_intensity: number
+}
+
+/** 反馈时间轴项 */
+export interface FeedbackTimelineItem {
+  id: string
+  timestamp: string
+  type: 'question' | 'answer' | 'feedback' | 'milestone'
+  content: string
+  dimension?: DimensionType
+  score?: number
+  icon?: string
+}
+
+/** 维度评分卡数据 */
+export interface DimensionScoreCardData {
+  dimension: DimensionType
+  score: number
+  max_score: number
+  feedback: string
+  trend: 'up' | 'down' | 'stable'
+  previous_score?: number
+  strengths: string[]
+  areas_to_improve: string[]
+}
+
+/** API 请求参数类型 */
+export interface PrepQuestionsParams {
+  mode: PrepMode
+  tech_stack: string[]
+  difficulty?: DifficultyLevel
+  dimensions?: DimensionType[]
+  limit?: number
+}
+
+export interface ReplayHistoryParams {
+  session_id?: string
+  skip?: number
+  limit?: number
+}
+
+export interface ProgressStatsParams {
+  user_id: string
+  timeframe?: 'week' | 'month' | 'quarter' | 'year'
+}

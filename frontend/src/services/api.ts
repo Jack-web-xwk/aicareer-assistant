@@ -509,4 +509,103 @@ export interface SSEMessage {
   report?: InterviewReport
 }
 
+// ============================================================================
+// Pod-C: Interview Prep & Progress APIs
+// ============================================================================
+
+/** 面试准备相关 API */
+export const prepApi = {
+  /** 获取预习题列表 */
+  getPrepQuestions: async (
+    params: import('../types').PrepQuestionsParams
+  ): Promise<
+    ApiResponse<{
+      questions: import('../types').InterviewQuestion[]
+      total: number
+    }>
+  > => {
+    const response = await api.get('/interview/prep/questions', { params })
+    return response.data
+  },
+
+  /** 提交准备答案 */
+  submitPrepAnswer: async (
+    data: import('../types').PrepAnswerRequest
+  ): Promise<ApiResponse<import('../types').PrepAnswerResponse>> => {
+    const response = await api.post('/interview/prep/answer', data)
+    return response.data
+  },
+}
+
+/** 面试回放相关 API */
+export const replayApi = {
+  /** 获取回放历史列表 */
+  getReplayHistory: async (
+    params?: import('../types').ReplayHistoryParams
+  ): Promise<
+    ApiResponse<{
+      items: import('../types').ReplaySession[]
+      total: number
+      skip: number
+      limit: number
+    }>
+  > => {
+    const { session_id, ...rest } = params || {}
+    const url = session_id
+      ? `/interview/replay/${session_id}`
+      : '/interview/replay/history'
+    const response = await api.get(url, { params: rest })
+    return response.data
+  },
+
+  /** 获取 A/B 答案对比数据 */
+  getComparison: async (
+    sessionId: string,
+    messageId: number
+  ): Promise<ApiResponse<import('../types').ComparisonView>> => {
+    const response = await api.get(
+      `/interview/replay/${sessionId}/comparison/${messageId}`
+    )
+    return response.data
+  },
+}
+
+/** 进度统计相关 API */
+export const progressApi = {
+  /** 获取用户进度统计数据 */
+  getProgressStats: async (
+    params: import('../types').ProgressStatsParams
+  ): Promise<ApiResponse<import('../types').ProgressStats>> => {
+    const response = await api.get('/interview/progress/stats', { params })
+    return response.data
+  },
+
+  /** 获取趋势数据 */
+  getTrendData: async (
+    userId: string,
+    timeframe: 'week' | 'month' | 'quarter' | 'year' = 'month'
+  ): Promise<
+    ApiResponse<{
+      data: import('../types').TrendDataPoint[]
+      timeframe: string
+    }>
+  > => {
+    const response = await api.get('/interview/progress/trend', {
+      params: { user_id: userId, timeframe },
+    })
+    return response.data
+  },
+
+  /** 获取热力图数据 */
+  getHeatmapData: async (
+    userId: string,
+    month?: string
+  ): Promise<ApiResponse<import('../types').HeatmapData>> => {
+    const response = await api.get('/interview/progress/heatmap', {
+      params: { user_id: userId, month },
+    })
+    return response.data
+  },
+}
+
 export default api
