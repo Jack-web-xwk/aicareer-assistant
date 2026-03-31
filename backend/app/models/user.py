@@ -34,9 +34,13 @@ class User(Base):
     # 用户信息
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     username: Mapped[str] = mapped_column(String(100), nullable=True)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    phone: Mapped[str] = mapped_column(String(20), nullable=True, index=True)
+    avatar_url: Mapped[str] = mapped_column(String(512), nullable=True)
     
     # 状态
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(

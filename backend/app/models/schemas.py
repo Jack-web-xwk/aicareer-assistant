@@ -5,9 +5,45 @@ Pydantic Schemas - 请求/响应模型
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, HttpUrl, EmailStr
+from pydantic import BaseModel, Field, HttpUrl, EmailStr, ConfigDict
+
+
+# ==================== Assessment Dimension Enums ====================
+
+class AssessmentDimension(str, Enum):
+    """面试评估维度"""
+    TECHNICAL_DEPTH = "technical_depth"  # 技术深度
+    TECHNICAL_BREADTH = "technical_breadth"  # 技术广度
+    COMMUNICATION = "communication"  # 沟通表达
+    LOGIC = "logic"  # 逻辑思维
+    PROBLEM_SOLVING = "problem_solving"  # 问题解决
+    
+    @property
+    def weight(self) -> float:
+        """获取维度权重"""
+        weights = {
+            "technical_depth": 0.25,      # 25%
+            "technical_breadth": 0.20,    # 20%
+            "communication": 0.20,        # 20%
+            "logic": 0.20,                # 20%
+            "problem_solving": 0.15,      # 15%
+        }
+        return weights.get(self.value, 0.0)
+    
+    @property
+    def display_name(self) -> str:
+        """获取维度显示名称"""
+        names = {
+            "technical_depth": "技术深度",
+            "technical_breadth": "技术广度",
+            "communication": "沟通表达",
+            "logic": "逻辑思维",
+            "problem_solving": "问题解决",
+        }
+        return names.get(self.value, self.value)
 
 
 # ==================== Common Schemas ====================
@@ -47,8 +83,7 @@ class UserResponse(BaseModel):
     is_active: bool
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== Resume Schemas ====================
@@ -145,8 +180,7 @@ class ResumeResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OptimizedResumeResponse(BaseModel):
@@ -160,24 +194,21 @@ class OptimizedResumeResponse(BaseModel):
     optimized_resume: Optional[str] = None  # Markdown format
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== Interview Schemas ====================
 
 class InterviewStartRequest(BaseModel):
     """开始面试请求"""
-    job_role: str = Field(..., description="目标岗位", example="Python后端工程师")
+    job_role: str = Field(..., description="目标岗位")
     tech_stack: List[str] = Field(
         ...,
         description="技术栈范围",
-        example=["Python", "FastAPI", "PostgreSQL", "Redis"],
     )
     difficulty_level: str = Field(
         default="medium",
         description="难度级别",
-        pattern="^(easy|medium|hard)$",
     )
 
 
@@ -206,8 +237,7 @@ class InterviewResponse(BaseModel):
     total_questions: int = 5
     audio_url: Optional[str] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class QuestionScore(BaseModel):
@@ -227,14 +257,80 @@ class InterviewReportResponse(BaseModel):
     duration_minutes: Optional[float] = None
     total_score: float = Field(..., ge=0, le=100)
     question_scores: List[QuestionScore] = []
+    dimension_scores: Optional[List["DimensionScore"]] = None  # 多维度评分
     strengths: List[str] = []
     weaknesses: List[str] = []
     suggestions: List[str] = []
     detailed_report: Optional[str] = None  # Markdown format
+    realtime_feedback_log: Optional[List["RealTimeFeedback"]] = None  # 实时反馈历史
+    learning_plan: Optional["LearningSuggestion"] = None  # 个性化学习计划
     completed_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ==================== Multi-Dimensional Assessment Schemas ====================
+
+class DimensionScore(BaseModel):
+    """维度评分"""
+    dimension_id: AssessmentDimension = Field(..., description="评估维度 ID")
+    score: float = Field(..., ge=0, le=100, description="维度得分 (0-100)")
+    feedback: str = Field(..., description="维度详细反馈")
+    key_points: List[str] = Field(default_factory=list, description="关键评分要点")
+    weight: float = Field(default=0.0, description="权重")
+    
+    @property
+    def weighted_score(self) -> float:
+        """计算加权分数"""
+        return self.score * self.weight
+
+
+class RealTimeFeedback(BaseModel):
+    """实时反馈"""
+    session_id: str = Field(..., description="面试会话 ID")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="反馈时间")
+    dimension_scores: List[DimensionScore] = Field(default_factory=list, description="当前维度评分")
+    overall_feedback: str = Field(..., description="整体反馈")
+    suggestions: List[str] = Field(default_factory=list, description="即时建议")
+    response_time_ms: Optional[int] = Field(None, ge=0, description="响应时间 (毫秒)")
+
+
+class LearningSuggestion(BaseModel):
+    """学习建议"""
+    dimension: AssessmentDimension = Field(..., description="薄弱维度")
+    weakness: str = Field(..., description="具体薄弱点描述")
+    learning_resources: List[Dict[str, Any]] = Field(default_factory=list, description="学习资源推荐")
+    action_items: List[str] = Field(default_factory=list, description="行动计划")
+    priority: str = Field(default="medium", description="优先级 (high/medium/low)")
+    estimated_hours: Optional[int] = Field(None, ge=0, description="预计学习时长 (小时)")
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "dimension": "technical_depth",
+                "weakness": "对并发编程原理理解不够深入",
+                "learning_resources": [
+                    {
+                        "title": "Java 并发编程实战",
+                        "type": "book",
+                        "url": "https://example.com/book"
+                    },
+                    {
+                        "title": "Coursera - 并行编程课程",
+                        "type": "course",
+                        "url": "https://coursera.org/learn/parallel-programming"
+                    }
+                ],
+                "action_items": [
+                    "阅读《Java 并发编程实战》第 1-5 章",
+                    "完成并发编程练习题",
+                    "实现一个线程池 Demo"
+                ],
+                "priority": "high",
+                "estimated_hours": 20
+            }
+        }
+    )
 
 
 # ==================== WebSocket Message Schemas ====================
@@ -274,8 +370,7 @@ class LearningArticleListItem(BaseModel):
     external_url: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LearningPhaseOut(BaseModel):
@@ -287,8 +382,7 @@ class LearningPhaseOut(BaseModel):
     articles: List[LearningArticleListItem] = Field(default_factory=list)
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LearningArticleDetail(BaseModel):
@@ -302,5 +396,79 @@ class LearningArticleDetail(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ==================== Question Bank Schemas ====================
+
+class QuestionBankBase(BaseModel):
+    """题库基础 Schema"""
+    category: str = Field(..., description="分类名称，如'后端开发'、'前端开发'")
+    tech_stack: Optional[List[str]] = Field(None, description="技术栈列表")
+    difficulty: str = Field(default="medium", description="难度级别 (easy/medium/hard)")
+    question: str = Field(..., description="问题描述")
+    expected_points: Optional[List[str]] = Field(None, description="期望回答要点")
+    follow_up_questions: Optional[List[str]] = Field(None, description="追问问题列表")
+
+
+class QuestionBankCreate(QuestionBankBase):
+    """创建题目请求"""
+    pass
+
+
+class QuestionBankUpdate(BaseModel):
+    """更新题目请求"""
+    category: Optional[str] = Field(None, description="分类名称")
+    tech_stack: Optional[List[str]] = Field(None, description="技术栈列表")
+    difficulty: Optional[str] = Field(None, description="难度级别")
+    question: Optional[str] = Field(None, description="问题描述")
+    expected_points: Optional[List[str]] = Field(None, description="期望回答要点")
+    follow_up_questions: Optional[List[str]] = Field(None, description="追问问题列表")
+    is_active: Optional[bool] = Field(None, description="是否启用")
+
+
+class QuestionBankResponse(QuestionBankBase):
+    """题目响应"""
+    id: int
+    usage_count: int = 0
+    avg_score: Optional[float] = None
+    is_active: bool = True
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class QuestionBankSearchRequest(BaseModel):
+    """搜索题目请求"""
+    keyword: Optional[str] = Field(None, description="关键词")
+    category: Optional[str] = Field(None, description="分类")
+    difficulty: Optional[str] = Field(None, description="难度级别")
+    tech_stack: Optional[List[str]] = Field(None, description="技术栈")
+    offset: int = Field(default=0, ge=0, description="偏移量")
+    limit: int = Field(default=20, ge=1, le=100, description="数量限制")
+
+
+class QuestionBankStatistics(BaseModel):
+    """题库统计响应"""
+    total_count: int = Field(..., description="总题目数")
+    category_stats: Dict[str, int] = Field(default_factory=dict, description="按分类统计")
+    difficulty_stats: Dict[str, int] = Field(default_factory=dict, description="按难度统计")
+    avg_usage: float = Field(..., description="平均使用次数")
+    avg_score: Optional[float] = Field(None, description="平均得分")
+    top_questions: List[Dict[str, Any]] = Field(default_factory=list, description="热门题目")
+
+
+class QuestionBankBatchImportRequest(BaseModel):
+    """批量导入请求"""
+    questions: List[Dict[str, Any]] = Field(..., description="题目数据列表")
+    skip_duplicates: bool = Field(default=True, description="是否跳过重复题目")
+
+
+class QuestionBankBatchImportResponse(BaseModel):
+    """批量导入响应"""
+    imported: int = Field(..., description="成功导入数量")
+    skipped: int = Field(..., description="跳过数量")
+    failed: int = Field(..., description="失败数量")
+    total: int = Field(..., description="总数")
+

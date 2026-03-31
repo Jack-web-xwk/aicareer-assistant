@@ -62,6 +62,11 @@ class InterviewRecord(Base):
     suggestions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
     detailed_report: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Markdown
     
+    # 多维度评估结果
+    dimension_scores: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array - 5 维度详细评分
+    realtime_feedback_log: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array - 实时反馈历史
+    learning_plan: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON - 个性化学习计划
+    
     # 状态
     status: Mapped[InterviewStatus] = mapped_column(
         SQLEnum(InterviewStatus),

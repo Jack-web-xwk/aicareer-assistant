@@ -10,6 +10,7 @@ from .resume_study_qa_session import ResumeStudyQaSession
 from .interview import InterviewRecord
 from .saved_job import SavedJob
 from .learning import LearningPhase, LearningArticle
+from .question_bank import QuestionBank
 from .schemas import (
     # User schemas
     UserCreate,
@@ -38,6 +39,7 @@ __all__ = [
     "SavedJob",
     "LearningPhase",
     "LearningArticle",
+    "QuestionBank",
     # User Schemas
     "UserCreate",
     "UserResponse",
