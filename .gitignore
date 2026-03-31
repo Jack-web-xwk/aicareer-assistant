@@ -3,7 +3,7 @@
 # ========================
 
 # Byte-compiled / optimized / DLL files
-__pycache__/
+*__pycache__/
 *.py[cod]
 *$py.class
 
@@ -118,7 +118,7 @@ pnpm-debug.log*
 *.temp
 .cache/
 .specstory
-./backend/.venv
-./backend/.env
+backend/.venv
+backend/.env
 ./frontend/node_modules
-
+.cursor/
