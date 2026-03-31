@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o-mini"
     
     # DeepSeek Configuration
-    DEEPSEEK_API_KEY: str = "sk-3c374bea34474a5196427330fdfaddd4"
+    DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_MODEL: str = "deepseek-chat"
     
     # 智谱 GLM Configuration
@@ -54,15 +54,18 @@ class Settings(BaseSettings):
     BAILIAN_MODEL: str = "qwen-plus"
     
     # Database Configuration
+    # 开发: sqlite+aiosqlite:///./data/career_assistant.db
+    # 生产: postgresql+asyncpg://user:pass@localhost:5432/aicareer
     DATABASE_URL: str = "sqlite+aiosqlite:///./data/career_assistant.db"
     
     # Application Settings
     APP_NAME: str = "AI Career Assistant"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
     
     # CORS Settings
-    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+    # 生产环境请设置为实际的前端域名，不要使用通配符 *
+    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000"
     
     # File Upload Settings
     MAX_UPLOAD_SIZE_MB: int = 10
@@ -74,6 +77,47 @@ class Settings(BaseSettings):
     
     # Interview Settings
     MAX_INTERVIEW_QUESTIONS: int = 5
+
+    # ========== Redis Configuration ==========
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_POOL_SIZE: int = 50
+    REDIS_SOCKET_TIMEOUT: float = 5.0
+    REDIS_CONNECT_TIMEOUT: float = 5.0
+    REDIS_RETRY_ON_TIMEOUT: bool = True
+    REDIS_MAX_RETRIES: int = 3
+
+    # ========== Celery Configuration ==========
+    CELERY_BROKER_URL: str = "redis://localhost:6379/1"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
+    CELERY_TASK_SERIALIZER: str = "json"
+    CELERY_RESULT_SERIALIZER: str = "json"
+    CELERY_TIMEZONE: str = "UTC"
+    CELERY_TASK_TRACK_STARTED: bool = True
+    CELERY_TASK_TIME_LIMIT: int = 300  # 5 minutes
+
+    # ========== WebSocket Configuration ==========
+    WEBSOCKET_HEARTBEAT_INTERVAL: int = 30  # seconds
+    WEBSOCKET_MAX_CONNECTIONS_PER_USER: int = 5
+    WEBSOCKET_MAX_RECONNECT_RETRIES: int = 3
+    WEBSOCKET_ORPHAN_TIMEOUT: int = 300  # 5 minutes
+
+    # ========== JWT Configuration ==========
+    JWT_SECRET_KEY: str = ""  # 留空则自动生成随机字符串
+
+    # ========== Streaming Audio Configuration ==========
+    STREAMING_AUDIO_ENABLED: bool = True
+    STREAMING_AUDIO_CHUNK_DURATION_MS: int = 1000
+    STREAMING_AUDIO_CACHE_TTL: int = 3600  # 1 hour
+
+    # ========== Prometheus Metrics Configuration ==========
+    METRICS_ENABLED: bool = True
+    METRICS_PORT: int = 8000
+    METRICS_ENDPOINT: str = "/metrics"
+
+    # ========== Performance Configuration ==========
+    PERFORMANCE_PROFILING_ENABLED: bool = False
+    SLOW_QUERY_THRESHOLD_MS: int = 1000
+    SLOW_API_THRESHOLD_MS: int = 2000
 
     # Job search (crawler aggregation)
     JOB_SEARCH_RATE_LIMIT_PER_MINUTE: int = 10
@@ -139,7 +183,12 @@ def get_settings() -> Settings:
     
     使用 lru_cache 确保配置只加载一次。
     """
-    return Settings()
+    s = Settings()
+    # 自动生成 JWT 密钥（如果未配置）
+    if not s.JWT_SECRET_KEY:
+        import secrets
+        s.JWT_SECRET_KEY = secrets.token_urlsafe(64)
+    return s
 
 
 # 全局配置实例

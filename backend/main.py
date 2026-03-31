@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.middleware.security import RequestSizeLimitMiddleware, GlobalExceptionMiddleware
 from app.core.config import settings
 from app.core.database import create_tables, ensure_sqlite_schema
 from app.core.database import async_session_maker
@@ -82,6 +83,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 安全中间件：全局异常处理（最外层，捕获所有未处理异常）
+app.add_middleware(GlobalExceptionMiddleware)
+# 安全中间件：请求体大小限制
+app.add_middleware(RequestSizeLimitMiddleware)
 
 # 全局异常日志（所有路由未捕获异常、HTTPException、422 均落盘）
 register_exception_handlers(app)

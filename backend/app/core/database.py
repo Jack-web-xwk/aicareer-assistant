@@ -15,9 +15,9 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 from .config import settings
-from app.utils.logger import get_logger
+import logging
 
-_logger = get_logger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
