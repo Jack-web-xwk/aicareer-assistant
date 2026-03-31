@@ -4,6 +4,7 @@ Interview API - 面试模拟接口
 提供面试模拟功能，包括 WebSocket 实时语音交互和 SSE 流式返回。
 """
 
+import asyncio
 import json
 import uuid
 from datetime import datetime
@@ -14,8 +15,10 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.redis_client import get_redis_client
 from app.models.interview import InterviewRecord, InterviewStatus
 from app.models.user import User
 from app.models.schemas import (
@@ -25,28 +28,77 @@ from app.models.schemas import (
     SuccessResponse,
 )
 from app.agents.interview_agent import InterviewAgent, InterviewState
+from app.services.question_service import QuestionService
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter()
 
-# 存储活跃的面试会话（生产环境应使用 Redis）
-active_sessions: Dict[str, InterviewState] = {}
+# Redis 客户端（用于会话持久化）
+# 迁移计划：
+# Day 1-2: Dual-write (同时写入内存和 Redis)
+# Day 3: 验证数据一致性
+# Day 4: 切换读操作到 Redis
+# Day 5: 清理内存存储代码
+active_sessions: Dict[str, InterviewState] = {}  # TODO: Phase out after migration
+
+# WebSocket 连接管理：每个 session_id 最多允许 1 个连接
+# 存储 session_id -> WebSocket 实例，用于替换旧连接
+_active_ws_connections: Dict[str, WebSocket] = {}
+
+# 心跳超时阈值（秒）：超过该时间无活动则断开
+WS_HEARTBEAT_TIMEOUT = 60
 
 
-async def get_or_create_user(db: AsyncSession, email: str = "default@example.com") -> User:
-    """获取或创建默认用户"""
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
+async def get_session_from_redis(session_id: str) -> Optional[InterviewState]:
+    """从 Redis 获取会话状态（带 fallback 逻辑）"""
+    redis_client = get_redis_client()
     
-    if not user:
-        user = User(email=email, username="Default User")
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
+    # 优先从 Redis 读取
+    try:
+        state = await redis_client.get_session(session_id)
+        if state:
+            logger.debug(f"从 Redis 恢复会话：{session_id}")
+            return state
+    except Exception as e:
+        logger.warning(f"Redis 读取失败，回退到内存：{e}")
     
-    return user
+    # Fallback: 从内存读取
+    return active_sessions.get(session_id)
+
+
+async def save_session_to_redis(session_id: str, state: InterviewState):
+    """保存会话状态到 Redis（dual-write）"""
+    # Dual-write: 同时写入内存和 Redis
+    active_sessions[session_id] = state
+    
+    try:
+        redis_client = get_redis_client()
+        await redis_client.save_session(session_id, state, ttl=604800)  # 7 days TTL
+        logger.debug(f"Dual-write 会话到 Redis: {session_id}")
+    except Exception as e:
+        logger.error(f"Redis 写入失败，但内存写入成功：{e}")
+
+
+async def delete_session_from_redis(session_id: str):
+    """从 Redis 和内存中删除会话"""
+    # 清理内存
+    if session_id in active_sessions:
+        del active_sessions[session_id]
+    
+    # 清理 Redis
+    try:
+        redis_client = get_redis_client()
+        await redis_client.delete_session(session_id)
+        logger.debug(f"从 Redis 删除会话：{session_id}")
+    except Exception as e:
+        logger.error(f"Redis 删除失败：{e}")
+
+
+async def get_or_create_user(db: AsyncSession, current_user: User = Depends(get_current_user)) -> User:
+    """获取当前已认证用户"""
+    return current_user
 
 
 @router.post("/start", response_model=SuccessResponse)
@@ -69,8 +121,14 @@ async def start_interview(
         session_id = str(uuid.uuid4())
         logger.debug(f"创建会话 ID: {session_id}")
         
-        # 创建面试智能体
-        agent = InterviewAgent()
+        # 创建题库服务（用于 hybrid mode）
+        question_service = QuestionService(db)
+        
+        # 创建面试智能体（启用混合模式）
+        agent = InterviewAgent(
+            question_service=question_service,
+            use_hybrid_mode=True,
+        )
         
         # 初始化面试
         logger.info("初始化面试智能体")
@@ -82,8 +140,8 @@ async def start_interview(
         )
         logger.debug("面试智能体初始化完成")
         
-        # 存储会话状态
-        active_sessions[session_id] = state
+        # 存储会话状态（Dual-write: 内存 + Redis）
+        await save_session_to_redis(session_id, state)
         
         # 创建数据库记录
         record = InterviewRecord(
@@ -144,8 +202,8 @@ async def submit_answer_stream(
     
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
-            # 获取会话状态
-            state = active_sessions.get(session_id)
+            # 获取会话状态（优先 Redis）
+            state = await get_session_from_redis(session_id)
             
             if not state:
                 yield f"data: {json.dumps({'type': 'error', 'message': 'Session not found'}, ensure_ascii=False)}\n\n"
@@ -173,8 +231,8 @@ async def submit_answer_stream(
             )
             logger.debug("回答处理完成")
             
-            # 更新会话状态
-            active_sessions[session_id] = new_state
+            # 更新会话状态（Dual-write: 内存 + Redis）
+            await save_session_to_redis(session_id, new_state)
             
             # 更新数据库记录
             result = await db.execute(
@@ -262,8 +320,8 @@ async def submit_answer(
     支持文本或音频输入。建议使用 /answer/stream 接口获得更好的实时体验。
     """
     logger.info(f"提交面试回答，会话 ID: {session_id}")
-    # 获取会话状态
-    state = active_sessions.get(session_id)
+    # 获取会话状态（优先 Redis）
+    state = await get_session_from_redis(session_id)
     
     if not state:
         # 尝试从数据库恢复
@@ -308,8 +366,8 @@ async def submit_answer(
         )
         logger.debug("回答处理完成")
         
-        # 更新会话状态
-        active_sessions[session_id] = new_state
+        # 更新会话状态（Dual-write: 内存 + Redis）
+        await save_session_to_redis(session_id, new_state)
         
         # 更新数据库记录
         result = await db.execute(
@@ -455,8 +513,8 @@ async def get_interview_status(
         logger.warning(f"面试会话不存在: {session_id}")
         raise HTTPException(status_code=404, detail="Interview session not found")
     
-    # 获取内存中的状态
-    state = active_sessions.get(session_id, {})
+    # 获取内存中的状态（优先 Redis）
+    state = await get_session_from_redis(session_id) or {}
     
     logger.debug(f"获取面试状态成功，会话 ID: {session_id}")
     return SuccessResponse(
@@ -590,28 +648,53 @@ async def interview_websocket(
 ):
     """
     WebSocket 实时面试交互
-    
+
     消息格式：
     - 客户端发送: {"type": "audio", "audio_base64": "..."} 或 {"type": "text", "content": "..."}
     - 服务器响应: {"type": "response", "question": "...", "audio_base64": "...", "is_finished": false}
+    - 心跳: 客户端 {"type": "ping"} -> 服务端 {"type": "pong"}
     """
-    logger.info(f"WebSocket 连接，会话 ID: {session_id}")
+    logger.info(f"WebSocket 连接请求，会话 ID: {session_id}")
+
+    # ========== 1. 连接数限制：同一个 session_id 最多 1 个连接 ==========
+    # 检查是否已有活跃连接，如有则优雅断开旧连接
+    old_ws = _active_ws_connections.get(session_id)
+    if old_ws is not None:
+        logger.info(f"会话 {session_id} 已有活跃连接，将替换旧连接")
+        try:
+            await old_ws.close(code=1012, reason="Replaced by new connection")
+        except Exception:
+            # 旧连接可能已经断开，忽略关闭异常
+            pass
+        finally:
+            # 从连接注册表中移除旧连接
+            _active_ws_connections.pop(session_id, None)
+
+    # 接受新连接
     await websocket.accept()
-    
-    # 检查会话是否存在
+
+    # 注册新连接
+    _active_ws_connections[session_id] = websocket
+    logger.info(f"WebSocket 连接已建立，会话 ID: {session_id}")
+
+    # ========== 初始化会话状态 ==========
     state = active_sessions.get(session_id)
-    
+
     if not state:
         logger.warning(f"会话不存在，WebSocket 连接失败: {session_id}")
-        await websocket.send_json({
-            "type": "error",
-            "message": "Session not found. Please start a new interview.",
-        })
-        await websocket.close()
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": "Session not found. Please start a new interview.",
+            })
+        except Exception:
+            pass
+        finally:
+            await _cleanup_ws_connection(session_id, websocket)
         return
-    
+
+    # 发送当前状态
     try:
-        # 发送当前状态
         await websocket.send_json({
             "type": "init",
             "session_id": session_id,
@@ -620,15 +703,48 @@ async def interview_websocket(
             "question_number": state.get("question_count", 1),
             "audio_base64": state.get("audio_output"),
         })
-        
-        # 创建智能体
-        agent = InterviewAgent()
-        
+    except Exception as e:
+        logger.error(f"发送初始化消息失败: {str(e)}")
+        await _cleanup_ws_connection(session_id, websocket)
+        return
+
+    # 创建智能体
+    agent = InterviewAgent()
+
+    # ========== 2. 心跳检测：跟踪最后活动时间 ==========
+    last_heartbeat = __import__("time").time()
+
+    try:
         while True:
-            # 接收消息
-            data = await websocket.receive_json()
+            # 使用超时接收消息，用于心跳检测
+            try:
+                data = await asyncio.wait_for(
+                    websocket.receive_json(),
+                    timeout=WS_HEARTBEAT_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                # 超过 WS_HEARTBEAT_TIMEOUT 秒无消息，判定为心跳超时
+                logger.warning(f"心跳超时，自动断开连接: {session_id}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Heartbeat timeout. Connection closed.",
+                })
+                break
+
+            # 更新最后活动时间
+            last_heartbeat = __import__("time").time()
             msg_type = data.get("type")
-            
+
+            # ========== 心跳处理 ==========
+            if msg_type == "ping":
+                logger.debug(f"收到心跳 ping: {session_id}")
+                try:
+                    await websocket.send_json({"type": "pong"})
+                except Exception:
+                    break
+                continue
+
+            # ========== 业务消息处理 ==========
             if msg_type == "audio":
                 # 处理音频输入
                 audio_base64 = data.get("audio_base64")
@@ -637,6 +753,7 @@ async def interview_websocket(
                     state=state,
                     audio_input=audio_base64,
                 )
+
             elif msg_type == "text":
                 # 处理文本输入
                 text_content = data.get("content")
@@ -645,24 +762,27 @@ async def interview_websocket(
                     state=state,
                     text_input=text_content,
                 )
+
             elif msg_type == "end":
                 # 提前结束
                 logger.info("提前结束面试")
                 state["is_finished"] = True
                 new_state = await agent._generate_report(state)
                 new_state["is_finished"] = True
+
             else:
+                # 未知消息类型：返回错误但不崩溃，继续监听
                 logger.warning(f"未知消息类型: {msg_type}")
                 await websocket.send_json({
                     "type": "error",
                     "message": f"Unknown message type: {msg_type}",
                 })
                 continue
-            
-            # 更新会话状态
+
+            # 更新会话状态（Dual-write）
             state = new_state
-            active_sessions[session_id] = state
-            
+            await save_session_to_redis(session_id, state)
+
             # 发送响应
             response = {
                 "type": "response",
@@ -673,34 +793,59 @@ async def interview_websocket(
                 "transcript": state.get("current_answer"),
                 "is_finished": state.get("is_finished", False),
             }
-            
+
             if state.get("is_finished"):
                 response["report"] = state.get("report")
-                # 清理会话
-                if session_id in active_sessions:
-                    del active_sessions[session_id]
-                logger.info(f"面试完成，WebSocket 连接关闭: {session_id}")
-            
+                logger.info(f"面试完成，准备关闭 WebSocket: {session_id}")
+
             await websocket.send_json(response)
-            
+
             if state.get("is_finished"):
                 break
-    
+
     except WebSocketDisconnect:
-        # 客户端断开连接
+        # 客户端正常断开连接
         logger.info(f"WebSocket 客户端断开连接: {session_id}")
-        pass
+
     except Exception as e:
+        # 其他未知异常
         logger.error(f"WebSocket 错误: {str(e)}", exc_info=True)
-        await websocket.send_json({
-            "type": "error",
-            "message": str(e),
-        })
-    finally:
         try:
-            await websocket.close()
+            await websocket.send_json({
+                "type": "error",
+                "message": f"Internal server error: {str(e)}",
+            })
         except Exception:
+            # 发送错误消息也失败，说明连接已不可用
             pass
+
+    finally:
+        # ========== 3. 内存清理：断开连接时清理所有关联状态 ==========
+        await _cleanup_ws_connection(session_id, websocket)
+
+
+async def _cleanup_ws_connection(session_id: str, websocket: WebSocket):
+    """
+    清理 WebSocket 连接关联的所有资源
+
+    Args:
+        session_id: 会话 ID
+        websocket: WebSocket 实例
+    """
+    # 从连接注册表中移除（仅移除当前连接，避免误删替换后的新连接）
+    current_ws = _active_ws_connections.get(session_id)
+    if current_ws is websocket:
+        _active_ws_connections.pop(session_id, None)
+        logger.debug(f"已从连接注册表移除: {session_id}")
+
+    # 关闭 WebSocket 连接
+    try:
+        await websocket.close(code=1000, reason="Normal closure")
+    except Exception:
+        # 连接可能已经关闭
+        pass
+
+    logger.info(f"WebSocket 连接已清理，会话 ID: {session_id}")
 
 
 @router.get("", response_model=SuccessResponse)

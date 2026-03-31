@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import get_current_user
 from app.core.config import settings
 from app.core.database import async_session_maker, get_db
 from app.core.exceptions import FileProcessingException, NotFoundException
@@ -35,6 +36,7 @@ from app.services.resume_optimization_job import (
     schedule_resume_optimization,
 )
 from app.services.resume_study_qa import generate_resume_study_qa
+from app.services.ats_scorer import calculate_ats_score
 from app.services.target_job_context import apply_target_job_to_resume_row
 from app.agents.resume_optimizer_agent import ResumeOptimizerAgent
 from app.utils.logger import get_logger
@@ -44,18 +46,9 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-async def get_or_create_user(db: AsyncSession, email: str = "default@example.com") -> User:
-    """获取或创建默认用户（简化版，实际应该有完整的认证）"""
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
-    
-    if not user:
-        user = User(email=email, username="Default User")
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
-    
-    return user
+async def get_or_create_user(db: AsyncSession, current_user: User = Depends(get_current_user)) -> User:
+    """获取当前已认证用户"""
+    return current_user
 
 
 # 必须放在 /{resume_id} 等动态路由之前，否则 "history" 会被当成路径参数并触发 int 校验失败（列表无法加载）
@@ -728,6 +721,66 @@ async def generate_resume_study_qa_endpoint(
             "created_at": row.created_at.isoformat(),
         },
     )
+
+
+@router.post("/{resume_id}/ats-score", response_model=SuccessResponse)
+async def get_ats_score(
+    resume_id: int,
+    job_description: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    ATS 兼容性评分
+
+    根据简历内容和岗位描述，从关键词匹配、格式兼容性、长度适当性三个维度
+    评估简历的 ATS（申请人跟踪系统）兼容性，并给出改进建议。
+
+    参数:
+        resume_id: 简历 ID
+        job_description: 岗位描述文本（如果不传，则使用已存储的 job_description）
+    """
+    logger.info(f"ATS 评分请求，简历 ID: {resume_id}")
+    result = await db.execute(select(Resume).where(Resume.id == resume_id))
+    resume = result.scalar_one_or_none()
+
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+
+    if not resume.original_text:
+        raise HTTPException(
+            status_code=400,
+            detail="简历尚未解析，无法进行 ATS 评分",
+        )
+
+    # 优先使用请求中传入的岗位描述，否则使用已存储的
+    jd = job_description or resume.job_description
+    if not jd:
+        raise HTTPException(
+            status_code=400,
+            detail="请提供岗位描述（job_description）以进行 ATS 评分",
+        )
+
+    try:
+        ats_result = calculate_ats_score(
+            resume_text=resume.original_text,
+            job_description=jd,
+        )
+        logger.info(
+            "ATS 评分完成，简历 ID: %s, 总分: %s",
+            resume_id,
+            ats_result["overall_score"],
+        )
+        return SuccessResponse(
+            success=True,
+            message="ATS 评分完成",
+            data=ats_result,
+        )
+    except Exception as e:
+        logger.error(f"ATS 评分失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"ATS 评分失败: {str(e)}",
+        )
 
 
 @router.get("/{resume_id}", response_model=SuccessResponse)
