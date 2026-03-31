@@ -13,6 +13,7 @@ Interview Agent - 面试模拟智能体
 
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
+import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
@@ -20,8 +21,33 @@ from langgraph.graph import StateGraph, END
 
 from app.core.config import settings
 from app.core.llm_provider import LLMFactory, LLMProvider, create_llm
+from app.core.prompts import (
+    MULTI_DIMENSION_ASSESSMENT_PROMPT,
+    REALTIME_FEEDBACK_PROMPT,
+    LEARNING_SUGGESTION_PROMPT,
+    TECHNICAL_DEPTH_ANALYSIS_PROMPT,
+    COMMUNICATION_EVAL_PROMPT,
+    PROBLEM_SOLVING_EVAL_PROMPT,
+    format_interview_record,
+    format_conversation_history,
+)
+from app.models.schemas import AssessmentDimension, DimensionScore, RealTimeFeedback, LearningSuggestion
 from app.services.audio_processor import AudioProcessor
 from app.utils.logger import get_logger
+
+
+class QuestionServiceRef:
+    """
+    QuestionService 引用类
+    
+    用于避免循环导入，只在运行时动态导入 QuestionService。
+    """
+    
+    @staticmethod
+    def get_service(db_session):
+        """动态获取 QuestionService 实例"""
+        from app.services.question_service import QuestionService
+        return QuestionService(db_session)
 
 
 class InterviewMessage(TypedDict):
@@ -57,6 +83,8 @@ class InterviewState(TypedDict):
     # 评分
     scores: List[Dict[str, Any]]               # 每题评分
     total_score: Optional[float]               # 总分
+    dimension_scores: Optional[List[Dict[str, Any]]]  # 多维度评分
+    realtime_feedback_log: Optional[List[Dict[str, Any]]]  # 实时反馈历史
     
     # 状态控制
     is_finished: bool                          # 是否结束
@@ -65,6 +93,7 @@ class InterviewState(TypedDict):
     
     # 最终报告
     report: Optional[Dict[str, Any]]           # 面试评估报告
+    learning_plan: Optional[Dict[str, Any]]    # 学习计划
 
 
 class InterviewAgent:
@@ -102,6 +131,8 @@ class InterviewAgent:
         """
         self.provider = provider
         self.model = model
+        self.question_service = question_service
+        self.use_hybrid_mode = use_hybrid_mode
         
         # 初始化日志记录器
         self.logger = get_logger(__name__)
@@ -137,6 +168,8 @@ class InterviewAgent:
             workflow.add_node("synthesize_speech", self._synthesize_speech)
             workflow.add_node("check_finish", self._check_finish)
             workflow.add_node("generate_report", self._generate_report)
+            workflow.add_node("generate_realtime_feedback", self._generate_realtime_feedback)  # 新增：实时反馈
+            workflow.add_node("generate_learning_plan", self._generate_learning_plan)  # 新增：学习计划
             
             # 设置入口点
             workflow.set_entry_point("init_interview")
@@ -152,12 +185,16 @@ class InterviewAgent:
                 "check_finish",
                 self._should_finish,
                 {
-                    "continue": END,  # 返回等待下一轮输入
+                    "continue": "generate_realtime_feedback",  # 继续时先生成实时反馈
                     "finish": "generate_report",
                 }
             )
             
-            workflow.add_edge("generate_report", END)
+            # 实时反馈后返回等待下一轮输入
+            workflow.add_edge("generate_realtime_feedback", END)
+            
+            workflow.add_edge("generate_report", "generate_learning_plan")
+            workflow.add_edge("generate_learning_plan", END)
             
             # 编译图
             return workflow.compile()
@@ -188,7 +225,67 @@ class InterviewAgent:
             "hard": "高难度，考察深入原理、性能优化和架构设计",
         }
         
-        system_prompt = f"""你是一位经验丰富的技术面试官，正在面试一位应聘「{job_role}」岗位的候选人。
+        # ==================== Hybrid Mode: 题库集成 ====================
+        question_from_bank = None
+        
+        if self.use_hybrid_mode and self.question_service:
+            import random
+            
+            # 50% 概率尝试从题库抽取
+            if random.random() < 0.5:
+                try:
+                    # 异步获取题库题目
+                    questions = await self.question_service.get_by_category(
+                        category=job_role,
+                        tech_stack=tech_stack,
+                        difficulty=difficulty,
+                        limit=10,
+                    )
+                    
+                    # Fallback 1: 如果技术栈过滤后没有题目，尝试只按分类 + 难度
+                    if not questions:
+                        questions = await self.question_service.get_by_category(
+                            category=job_role,
+                            difficulty=difficulty,
+                            limit=10,
+                        )
+                    
+                    # Fallback 2: 如果还是没有，尝试只按分类
+                    if not questions:
+                        questions = await self.question_service.get_by_category(
+                            category=job_role,
+                            limit=10,
+                        )
+                    
+                    # 如果有题目，随机选择一个
+                    if questions:
+                        selected_question = random.choice(questions)
+                        question_from_bank = selected_question.question
+                        self.logger.info(
+                            f"从题库抽取题目：id={selected_question.id}, "
+                            f"category={selected_question.category}"
+                        )
+                except Exception as e:
+                    self.logger.warning(f"题库抽取失败，切换到 LLM 模式：{str(e)}")
+        
+        # ==================== 生成面试开场 ====================
+        if question_from_bank:
+            # 使用题库题目
+            system_prompt = f"""你是一位经验丰富的技术面试官，正在面试一位应聘「{job_role}」岗位的候选人。
+
+面试配置：
+- 目标岗位：{job_role}
+- 技术栈范围：{', '.join(tech_stack)}
+- 难度级别：{difficulty} - {difficulty_desc.get(difficulty, difficulty_desc['medium'])}
+
+面试要求：
+1. 先简单自我介绍（1-2 句话）
+2. 然后提出以下技术问题（不要修改问题本身）：
+   "{question_from_bank}"
+3. 保持专业友好的态度"""
+        else:
+            # 使用 LLM 生成
+            system_prompt = f"""你是一位经验丰富的技术面试官，正在面试一位应聘「{job_role}」岗位的候选人。
 
 面试配置：
 - 目标岗位：{job_role}
@@ -472,6 +569,227 @@ class InterviewAgent:
             "is_finished": should_finish,
             "current_step": "check_finish",
         }
+    
+    async def _generate_realtime_feedback(self, state: InterviewState) -> Dict[str, Any]:
+        """
+        节点 6: 生成实时反馈
+        
+        基于候选人当前回答，提供简洁、即时的反馈（目标延迟 <200ms）。
+        """
+        start_time = time.time()
+        
+        job_role = state.get("job_role", "未知岗位")
+        current_question = state.get("current_question", "")
+        current_answer = state.get("current_answer", "")
+        question_count = state.get("question_count", 1)
+        max_questions = state.get("max_questions", 5)
+        session_id = state.get("session_id", "unknown")
+        
+        try:
+            prompt = REALTIME_FEEDBACK_PROMPT.format(
+                job_role=job_role,
+                current_question=current_question[:200] if current_question else "",
+                current_answer=current_answer[:300] if current_answer else "",
+                question_count=question_count,
+                max_questions=max_questions,
+            )
+            
+            messages = [
+                SystemMessage(content="你是专业的面试反馈助手，请生成简洁的 JSON 格式反馈。"),
+                HumanMessage(content=prompt),
+            ]
+            
+            response = await self.llm.ainvoke(messages, {"temperature": 0.2})
+            
+            import json
+            content = response.content
+            json_str = self._extract_json(content)
+            feedback_data = json.loads(json_str)
+            
+            response_time_ms = int((time.time() - start_time) * 1000)
+            
+            realtime_feedback = RealTimeFeedback(
+                session_id=session_id,
+                dimension_scores=[],
+                overall_feedback=feedback_data.get("overall_feedback", ""),
+                suggestions=feedback_data.get("suggestions", []),
+                response_time_ms=response_time_ms,
+            )
+            
+            realtime_feedback_log = list(state.get("realtime_feedback_log", []))
+            realtime_feedback_log.append(realtime_feedback.model_dump())
+            
+            self.logger.info(f"实时反馈已生成，响应时间：{response_time_ms}ms")
+            
+            return {
+                "realtime_feedback_log": realtime_feedback_log,
+                "current_step": "generate_realtime_feedback",
+            }
+        
+        except Exception as e:
+            self.logger.warning(f"实时反馈生成失败（非致命）: {str(e)}")
+            return {
+                "realtime_feedback_log": state.get("realtime_feedback_log", []),
+                "current_step": "generate_realtime_feedback",
+            }
+    
+    async def _generate_report(self, state: InterviewState) -> Dict[str, Any]:
+        """
+        节点 7: 生成面试评估报告（多维度评分）
+        
+        综合评估面试表现，从 5 个维度生成详细报告。
+        """
+        job_role = state.get("job_role", "未知岗位")
+        tech_stack = state.get("tech_stack", [])
+        scores = state.get("scores", [])
+        
+        if scores:
+            total_score = sum(s.get("score", 0) for s in scores) / len(scores)
+        else:
+            total_score = 0
+        
+        interview_record = format_interview_record(scores)
+        
+        try:
+            prompt = MULTI_DIMENSION_ASSESSMENT_PROMPT.format(
+                job_role=job_role,
+                tech_stack=", ".join(tech_stack),
+                interview_record=interview_record,
+            )
+            
+            messages = [
+                SystemMessage(content="你是专业的多维度面试评估专家。请严格按照 JSON 格式输出。"),
+                HumanMessage(content=prompt),
+            ]
+            
+            response = await self.llm.ainvoke(messages, {"temperature": 0.3})
+            
+            import json
+            content = response.content
+            json_str = self._extract_json(content)
+            report_data = json.loads(json_str)
+            
+            dimension_scores = []
+            for dim_data in report_data.get("dimension_scores", []):
+                try:
+                    dim_id = dim_data.get("dimension_id")
+                    if isinstance(dim_id, str):
+                        dimension = AssessmentDimension(dim_id)
+                    else:
+                        continue
+                    
+                    dim_score = DimensionScore(
+                        dimension_id=dimension,
+                        score=float(dim_data.get("score", 0)),
+                        feedback=dim_data.get("feedback", ""),
+                        key_points=dim_data.get("key_points", []),
+                        weight=dimension.weight,
+                    )
+                    dimension_scores.append(dim_score.model_dump())
+                except ValueError as e:
+                    self.logger.warning(f"无效的维度 ID: {dim_data.get('dimension_id')}")
+            
+            if dimension_scores:
+                weighted_total = sum(DimensionScore(**ds).weighted_score for ds in dimension_scores)
+                report_data["total_score"] = round(weighted_total, 2)
+            
+            report_data["question_scores"] = scores
+            
+            return {
+                "report": report_data,
+                "dimension_scores": dimension_scores,
+                "total_score": report_data.get("total_score", total_score),
+                "current_step": "generate_report",
+            }
+        
+        except Exception as e:
+            self.logger.error(f"评估报告生成失败：{str(e)}", exc_info=True)
+            return {
+                "report": {
+                    "total_score": total_score,
+                    "grade": self._score_to_grade(total_score),
+                    "strengths": [],
+                    "weaknesses": [],
+                    "suggestions": ["报告生成失败，请查看详细评分"],
+                    "question_scores": scores,
+                },
+                "dimension_scores": [],
+                "total_score": total_score,
+                "current_step": "generate_report",
+            }
+    
+    async def _generate_learning_plan(self, state: InterviewState) -> Dict[str, Any]:
+        """
+        节点 8: 生成个性化学习计划
+        
+        基于面试评估结果，为候选人制定学习计划。
+        """
+        job_role = state.get("job_role", "未知岗位")
+        dimension_scores = state.get("dimension_scores", [])
+        
+        if not dimension_scores:
+            return {"learning_plan": None, "current_step": "generate_learning_plan"}
+        
+        try:
+            min_score = 100
+            weakest_dimension = None
+            weakness_description = ""
+            
+            for dim_data in dimension_scores:
+                score = dim_data.get("score", 0)
+                if score < min_score:
+                    min_score = score
+                    weakest_dimension = dim_data.get("dimension_id")
+                    weakness_description = dim_data.get("feedback", "")
+            
+            if not weakest_dimension:
+                return {"learning_plan": None, "current_step": "generate_learning_plan"}
+            
+            other_dimensions = {
+                dim.get("dimension_id"): dim.get("score")
+                for dim in dimension_scores
+                if dim.get("dimension_id") != weakest_dimension
+            }
+            
+            prompt = LEARNING_SUGGESTION_PROMPT.format(
+                job_role=job_role,
+                experience_level="mid",
+                weakness_dimension=weakest_dimension,
+                weakness_description=weakness_description[:200],
+                other_dimensions=str(other_dimensions),
+            )
+            
+            messages = [
+                SystemMessage(content="你是专业的学习规划师。请生成具体、可执行的学习计划。"),
+                HumanMessage(content=prompt),
+            ]
+            
+            response = await self.llm.ainvoke(messages, {"temperature": 0.4})
+            
+            import json
+            content = response.content
+            json_str = self._extract_json(content)
+            learning_plan_data = json.loads(json_str)
+            
+            return {
+                "learning_plan": learning_plan_data,
+                "current_step": "generate_learning_plan",
+            }
+        
+        except Exception as e:
+            self.logger.error(f"学习计划生成失败：{str(e)}", exc_info=True)
+            return {
+                "learning_plan": None,
+                "current_step": "generate_learning_plan",
+            }
+    
+    def _extract_json(self, content: str) -> str:
+        """从 LLM 响应中提取 JSON"""
+        if "```json" in content:
+            return content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            return content.split("```")[1].split("```")[0].strip()
+        return content.strip()
     
     async def _generate_report(self, state: InterviewState) -> Dict[str, Any]:
         """
