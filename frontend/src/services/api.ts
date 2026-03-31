@@ -56,12 +56,32 @@ const api: AxiosInstance = axios.create({
   },
 })
 
-// Response interceptor for error handling
+// Request interceptor - attach JWT token
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => Promise.reject(error)
+)
+
+// Response interceptor for error handling + 401 redirect
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     if (axios.isCancel(error) || error.code === 'ERR_CANCELED') {
       return Promise.reject(error)
+    }
+    // 401 → 清除 token 并跳转登录
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('user')
+      if (window.location.pathname !== '/auth') {
+        window.location.href = '/auth'
+      }
     }
     const message = formatAxiosErrorMessage(error)
     console.error('API Error:', message, error.response?.status, error.response?.data)
@@ -75,7 +95,41 @@ export const checkHealth = async (): Promise<ApiResponse> => {
   return response.data
 }
 
-// Resume APIs
+// ========== Auth APIs ==========
+
+export const authApi = {
+  register: async (data: { email: string; password: string; username?: string; phone?: string }) => {
+    const response = await api.post('/auth/register', data);
+    return response.data;
+  },
+
+  login: async (email: string, password: string) => {
+    const response = await api.post('/auth/login', { email, password });
+    return response.data;
+  },
+
+  getMe: async () => {
+    const response = await api.get('/auth/me');
+    return response.data;
+  },
+
+  updateProfile: async (data: { username?: string; phone?: string; avatar_url?: string }) => {
+    const response = await api.put('/auth/me', data);
+    return response.data;
+  },
+
+  changePassword: async (old_password: string, new_password: string) => {
+    const response = await api.post('/auth/change-password', { old_password, new_password });
+    return response.data;
+  },
+
+  refresh: async () => {
+    const response = await api.post('/auth/refresh');
+    return response.data;
+  },
+};
+
+// ========== Resume APIs ==========
 export const resumeApi = {
   // Upload resume file
   upload: async (
