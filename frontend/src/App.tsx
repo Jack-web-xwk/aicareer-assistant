@@ -1,5 +1,5 @@
-import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom'
-import { Layout, Menu, Typography } from 'antd'
+import { BrowserRouter, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom'
+import { Layout, Menu, Typography, Dropdown, Avatar, message } from 'antd'
 import {
   FileTextOutlined,
   AudioOutlined,
@@ -10,7 +10,10 @@ import {
   AimOutlined,
   FolderOpenOutlined,
   ReadOutlined,
+  UserOutlined,
+  LogoutOutlined,
 } from '@ant-design/icons'
+import { useState, useEffect } from 'react'
 import HomePage from './pages/HomePage'
 import ResumeOptimizerPage from './pages/ResumeOptimizerPage'
 import ResumeHistoryPage from './pages/ResumeHistoryPage'
@@ -20,9 +23,18 @@ import JobsPage from './pages/JobsPage'
 import SavedJobsPage from './pages/SavedJobsPage'
 import TargetJobUrlPage from './pages/TargetJobUrlPage'
 import LearnPage from './pages/LearnPage'
+import AuthPage from './pages/AuthPage'
+import OnboardingGuide from './components/OnboardingGuide'
 
 const { Header, Content, Footer } = Layout
 const { Title } = Typography
+
+interface UserInfo {
+  id: number
+  email: string
+  username?: string
+  avatar_url?: string
+}
 
 function menuSelectedKey(pathname: string): string {
   if (pathname.startsWith('/learn')) return '/learn'
@@ -35,9 +47,57 @@ function menuSelectedKey(pathname: string): string {
   return pathname
 }
 
+// 受保护路由：未登录跳转到 /auth
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const token = localStorage.getItem('token')
+  if (!token) {
+    return <Navigate to="/auth" replace />
+  }
+  return <>{children}</>
+}
+
 function AppLayout() {
   const location = useLocation()
-  
+  const [user, setUser] = useState<UserInfo | null>(null)
+  const [token, setToken] = useState<string | null>(null)
+
+  useEffect(() => {
+    const savedToken = localStorage.getItem('token')
+    const savedUser = localStorage.getItem('user')
+    if (savedToken) setToken(savedToken)
+    if (savedUser) {
+      try { setUser(JSON.parse(savedUser)) } catch {}
+    }
+  }, [])
+
+  // 路由变化时重新检查 token
+  useEffect(() => {
+    const savedToken = localStorage.getItem('token')
+    const savedUser = localStorage.getItem('user')
+    setToken(savedToken)
+    if (savedUser) {
+      try { setUser(JSON.parse(savedUser)) } catch {}
+    }
+  }, [location.pathname])
+
+  const handleLogin = (newToken: string, newUser: any) => {
+    setToken(newToken)
+    setUser(newUser)
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
+    setToken(null)
+    setUser(null)
+    message.success('已退出登录')
+  }
+
+  // 登录/注册页
+  if (location.pathname === '/auth') {
+    return <AuthPage onLogin={handleLogin} />
+  }
+
   const menuItems = [
     {
       key: '/',
@@ -52,7 +112,7 @@ function AppLayout() {
     {
       key: '/target-jobs',
       icon: <AimOutlined />,
-      label: <Link to="/target-jobs">目标岗位（链接/截图）</Link>,
+      label: <Link to="/target-jobs">目标岗位</Link>,
     },
     {
       key: '/jobs/saved',
@@ -81,12 +141,30 @@ function AppLayout() {
     },
   ]
 
+  const userMenuItems = [
+    {
+      key: 'profile',
+      icon: <UserOutlined />,
+      label: user?.username || user?.email || '用户',
+    },
+    {
+      type: 'divider' as const,
+    },
+    {
+      key: 'logout',
+      icon: <LogoutOutlined />,
+      label: '退出登录',
+      onClick: handleLogout,
+    },
+  ]
+
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Header
         style={{
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'space-between',
           padding: '0 48px',
           background: '#ffffff',
           borderBottom: '1px solid var(--color-border)',
@@ -110,20 +188,30 @@ function AppLayout() {
             AI 求职助手
           </Title>
         </div>
-        <Menu
-          mode="horizontal"
-          selectedKeys={[menuSelectedKey(location.pathname)]}
-          items={menuItems}
-          style={{
-            flex: 1,
-            minWidth: 0,
-            background: 'transparent',
-            borderBottom: 'none',
-            marginLeft: '48px',
-          }}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <Menu
+            mode="horizontal"
+            selectedKeys={[menuSelectedKey(location.pathname)]}
+            items={menuItems}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              background: 'transparent',
+              borderBottom: 'none',
+            }}
+          />
+          {token && (
+            <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
+              <Avatar
+                icon={<UserOutlined />}
+                style={{ backgroundColor: '#6366f1', cursor: 'pointer' }}
+                src={user?.avatar_url}
+              />
+            </Dropdown>
+          )}
+        </div>
       </Header>
-      
+
       <Content
         style={{
           padding: '24px 48px',
@@ -132,18 +220,20 @@ function AppLayout() {
         }}
       >
         <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/jobs/saved" element={<SavedJobsPage />} />
-          <Route path="/jobs" element={<JobsPage />} />
-          <Route path="/target-jobs" element={<TargetJobUrlPage />} />
-          <Route path="/resume/history" element={<ResumeHistoryPage />} />
-          <Route path="/resume/study-qa" element={<ResumeStudyQaPage />} />
-          <Route path="/resume" element={<ResumeOptimizerPage />} />
-          <Route path="/learn" element={<LearnPage />} />
-          <Route path="/interview" element={<InterviewSimulatorPage />} />
+          <Route path="/auth" element={<AuthPage onLogin={handleLogin} />} />
+          <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
+          <Route path="/jobs/saved" element={<ProtectedRoute><SavedJobsPage /></ProtectedRoute>} />
+          <Route path="/jobs" element={<ProtectedRoute><JobsPage /></ProtectedRoute>} />
+          <Route path="/target-jobs" element={<ProtectedRoute><TargetJobUrlPage /></ProtectedRoute>} />
+          <Route path="/resume/history" element={<ProtectedRoute><ResumeHistoryPage /></ProtectedRoute>} />
+          <Route path="/resume/study-qa" element={<ProtectedRoute><ResumeStudyQaPage /></ProtectedRoute>} />
+          <Route path="/resume" element={<ProtectedRoute><ResumeOptimizerPage /></ProtectedRoute>} />
+          <Route path="/learn" element={<ProtectedRoute><LearnPage /></ProtectedRoute>} />
+          <Route path="/interview" element={<ProtectedRoute><InterviewSimulatorPage /></ProtectedRoute>} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Content>
-      
+
       <Footer
         style={{
           textAlign: 'center',
@@ -154,6 +244,8 @@ function AppLayout() {
       >
         AI Career Assistant ©{new Date().getFullYear()} - Powered by FastAPI + LangGraph
       </Footer>
+      {/* 用户首次访问引导 */}
+      <OnboardingGuide />
     </Layout>
   )
 }
