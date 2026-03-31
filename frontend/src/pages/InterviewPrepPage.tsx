@@ -93,8 +93,9 @@ const InterviewPrepPage: React.FC = () => {
       if (response.success && response.data) {
         setQuestions(response.data.questions)
       }
-    } catch (error: any) {
-      message.error(error.message || '加载题目失败')
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : '加载题目失败'
+      message.error(errorMessage)
     } finally {
       setLoading(false)
     }
@@ -155,8 +156,9 @@ const InterviewPrepPage: React.FC = () => {
       // TODO: 实现答案提交逻辑
       message.success('答案已提交！正在分析...')
       setCurrentStep(3) // 跳转到反馈步骤
-    } catch (error: any) {
-      message.error(error.message || '提交失败')
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : '提交失败'
+      message.error(errorMessage)
     } finally {
       setLoading(false)
     }

@@ -70,16 +70,18 @@ const ProgressDashboardPage: React.FC = () => {
       if (interviewsRes.success && interviewsRes.data) {
         setRecentInterviews(interviewsRes.data.items)
       }
-    } catch (error: any) {
-      console.error('加载数据失败:', error)
+    } catch (error: unknown) {
+      console.error('加载数据失败:', error instanceof Error ? error.message : error)
     } finally {
       setLoading(false)
     }
   }
 
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     loadData()
   }, [timeRange, currentMonth])
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // 维度中文映射
   const getDimensionLabel = (dim: DimensionType): string => {

@@ -67,8 +67,8 @@ const InterviewReplayPage: React.FC = () => {
       if (response.success && response.data) {
         setSessions(response.data.items)
       }
-    } catch (error: any) {
-      console.error('加载历史失败:', error)
+    } catch (error: unknown) {
+      console.error('加载历史失败:', error instanceof Error ? error.message : error)
     } finally {
       setLoading(false)
     }
@@ -151,8 +151,8 @@ const InterviewReplayPage: React.FC = () => {
       if (response.success && response.data) {
         setComparisonData(response.data)
       }
-    } catch (error: any) {
-      console.error('加载对比数据失败:', error)
+    } catch (error: unknown) {
+      console.error('加载对比数据失败:', error instanceof Error ? error.message : error)
     }
   }
 
