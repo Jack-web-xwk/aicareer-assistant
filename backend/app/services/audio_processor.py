@@ -2,6 +2,7 @@
 Audio Processor Service - 音频处理服务
 
 使用 OpenAI Whisper 和 TTS 实现语音转文字和文字转语音。
+支持同步和异步（Celery）两种模式。
 """
 
 import base64
