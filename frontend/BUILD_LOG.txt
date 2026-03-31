@@ -1,0 +1,61 @@
+AI Career Assistant - Frontend Build Log
+=========================================
+Date: 2026-03-31 16:22 GMT+8
+Builder: PWA + Onboarding subagent
+
+Build Command: npm run build (tsc && vite build)
+
+Dependencies Added:
+- vite-plugin-pwa: ^0.20.0
+- workbox-background-sync: ^7.1.0
+- workbox-core: ^7.1.0
+- workbox-expiration: ^7.1.0
+- workbox-precaching: ^7.1.0
+- workbox-routing: ^7.1.0
+- workbox-strategies: ^7.1.0
+
+Files Modified:
+- vite.config.ts: Added VitePWA plugin with manifest config
+- package.json: Added PWA dependencies
+- src/App.tsx: Imported and rendered OnboardingGuide component
+
+Files Created:
+- src/components/OnboardingGuide.tsx: 3-step onboarding guide
+- public/icon-192.png: PWA icon 192x192
+- public/icon-512.png: PWA icon 512x512
+
+Build Output:
+=========================================
+> ai-career-assistant@1.0.0 build
+> tsc && vite build
+
+vite v5.4.21 building for production...
+transforming...
+✓ 3264 modules transformed.
+rendering chunks...
+computing gzip size...
+
+dist/registerSW.js                  0.13 kB
+dist/manifest.webmanifest           0.31 kB
+dist/index.html                     0.91 kB │ gzip: 0.51 kB
+dist/assets/index-DnBUqsmJ.css      3.89 kB │ gzip: 1.16 kB
+dist/assets/index-D26zC9F8.js    1474.25 kB │ gzip: 464.65 kB
+✓ built in 7.24s
+
+PWA v0.20.5
+mode      generateSW
+precache  8 entries (1453.66 KiB)
+files generated
+  dist/sw.js
+  dist/workbox-8c29f6e4.js
+
+Result: SUCCESS
+=========================================
+- TypeScript compilation: PASSED
+- Vite build: PASSED
+- PWA service worker generated: YES (8 precache entries)
+- Manifest generated: YES (dist/manifest.webmanifest)
+
+Notes:
+- CSS warning: @import must precede all other statements (non-blocking)
+- Chunk size warning: Some chunks > 500kB (expected for antd bundle)
