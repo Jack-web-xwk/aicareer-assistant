@@ -14,7 +14,6 @@ import {
   Col,
   Typography,
   Upload,
-  Input,
   Button,
   Steps,
   Progress,
@@ -44,6 +43,7 @@ import {
   LoadingOutlined,
   ClockCircleOutlined,
   HistoryOutlined,
+  LinkOutlined,
 } from '@ant-design/icons'
 import type { UploadFile } from 'antd/es/upload/interface'
 import ReactMarkdown from 'react-markdown'
@@ -58,6 +58,7 @@ import type {
   ResumeStatus,
   ResumeUploadListItem,
   StudyQaItem,
+  SavedJobRecord,
 } from '../types'
 
 const { Title, Paragraph, Text } = Typography
@@ -132,6 +133,11 @@ function ResumeOptimizerPage() {
   const [existingResumes, setExistingResumes] = useState<ResumeUploadListItem[]>([])
   const [existingListLoading, setExistingListLoading] = useState(false)
   const [selectedExistingId, setSelectedExistingId] = useState<number | null>(null)
+  
+  /** 目标岗位选择（下拉框） */
+  const [savedJobs, setSavedJobs] = useState<SavedJobRecord[]>([])
+  const [jobsLoading, setJobsLoading] = useState(false)
+  const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
 
   const setProgressForNode = useCallback((nodeKey: ResumeOptimizerGraphNode) => {
     const idx = GRAPH_NODES.findIndex((n) => n.key === nodeKey)
@@ -192,6 +198,24 @@ function ResumeOptimizerPage() {
       setJobUrl(r.target_job_url || '')
       setResumeErrorMessage(null)
       setResumeStatus(r.status)
+      
+      // 从 langgraph_node_outputs 恢复节点输出数据（用于历史回看）
+      if (r.langgraph_node_outputs) {
+        const nodeOutputsRestored: Partial<Record<ResumeOptimizerGraphNode, ResumeNodeOutputPayload>> = {}
+        const nodeKeyMap: Record<string, ResumeOptimizerGraphNode> = {
+          'extract_resume_info': 'extract_resume_info',
+          'analyze_job_requirements': 'analyze_job_requirements',
+          'match_content': 'match_content',
+          'generate_optimized_resume': 'generate_optimized_resume',
+        }
+        Object.entries(r.langgraph_node_outputs).forEach(([key, value]) => {
+          const nodeKey = nodeKeyMap[key]
+          if (nodeKey) {
+            nodeOutputsRestored[nodeKey] = value as ResumeNodeOutputPayload
+          }
+        })
+        setNodeOutputs(nodeOutputsRestored)
+      }
 
       if (r.status === 'optimized') {
         setOptimizedResume(r.optimized_resume || '')
@@ -414,19 +438,47 @@ function ResumeOptimizerPage() {
       setExistingListLoading(true)
       try {
         const res = await resumeApi.list(0, 100)
-        if (res.success && res.data?.resumes) {
-          setExistingResumes(res.data.resumes)
+        if (res.success && res.data?.items) {
+          setExistingResumes(res.data.items)
         } else {
           setExistingResumes([])
         }
       } catch (e) {
-        message.error(`加载已有简历列表失败: ${(e as Error).message}`)
+        message.error(`加载已有简历列表失败：${(e as Error).message}`)
         setExistingResumes([])
       } finally {
         setExistingListLoading(false)
       }
     })()
   }, [currentStep])
+    
+  // 加载已收藏的岗位列表（用于下拉选择）
+  useEffect(() => {
+    if (currentStep !== 1) return
+    void (async () => {
+      setJobsLoading(true)
+      try {
+        const res = await jobSavedApi.list()
+        if (res.success && res.data?.items) {
+          setSavedJobs(res.data.items)
+          // 如果当前 jobUrl 与某个已收藏岗位匹配，自动选中
+          if (jobUrl) {
+            const matchedJob = res.data.items.find(j => j.detail_url === jobUrl)
+            if (matchedJob) {
+              setSelectedJobId(matchedJob.id)
+            }
+          }
+        } else {
+          setSavedJobs([])
+        }
+      } catch (e) {
+        console.error('加载已收藏岗位失败:', e)
+        setSavedJobs([])
+      } finally {
+        setJobsLoading(false)
+      }
+    })()
+  }, [currentStep, jobUrl])
 
   /** 第一步停留在「已上传/解析中」时轮询直到可进入岗位链接步骤 */
   useEffect(() => {
@@ -504,7 +556,7 @@ function ResumeOptimizerPage() {
 
     const file = fileList[0].originFileObj
     if (!file) return
-
+  
     setLoading(true)
     try {
       const response = await resumeApi.upload(file)
@@ -517,9 +569,19 @@ function ResumeOptimizerPage() {
         message.success('简历上传成功！')
       }
     } catch (error) {
-      message.error(`上传失败: ${(error as Error).message}`)
+      message.error(`上传失败：${(error as Error).message}`)
     } finally {
       setLoading(false)
+    }
+  }
+    
+  // 处理岗位选择
+  const handleJobSelect = (jobId: number) => {
+    setSelectedJobId(jobId)
+    const job = savedJobs.find(j => j.id === jobId)
+    if (job) {
+      setJobUrl(job.detail_url)
+      message.success(`已选择岗位：${job.title}`)
     }
   }
 
@@ -862,7 +924,6 @@ function ResumeOptimizerPage() {
               </Paragraph>
               <Select
                 showSearch
-                allowClear
                 placeholder="选择一份已上传的简历"
                 style={{ width: '100%', marginBottom: 16 }}
                 optionFilterProp="label"
@@ -891,19 +952,41 @@ function ResumeOptimizerPage() {
       {currentStep === 1 && (
         <Card style={cardStyle}>
           <Title level={4} style={{ color: 'var(--color-text-primary)' }}>
-            第二步：准备优化（目标岗位链接）
+            第二步：准备优化（选择目标岗位）
           </Title>
           <Paragraph type="secondary">
-            请在「目标岗位搜索」中查找并选择岗位，将自动带入链接；也可手动粘贴 Boss直聘等招聘详情页 URL。
+            从下方下拉框选择已收藏的岗位（仅支持已解析成功的岗位，避免 URL 爬取失败）。
           </Paragraph>
-          <Paragraph style={{ marginBottom: 16 }}>
-            <Link to="/target-jobs">
-              <Button type="default" icon={<SearchOutlined />}>
-                前往目标岗位搜索
-              </Button>
-            </Link>
-          </Paragraph>
-
+                
+          {/* 岗位选择下拉框 */}
+          <div style={{ marginBottom: 16 }}>
+            <Select
+              size="large"
+              placeholder="选择已收藏的岗位"
+              value={selectedJobId || undefined}
+              onChange={handleJobSelect}
+              loading={jobsLoading}
+              allowClear
+              style={{ width: '100%', marginBottom: 16 }}
+              options={savedJobs.map(job => ({
+                label: `${job.title} - ${job.company_name}`,
+                value: job.id,
+              }))}
+              notFoundContent={savedJobs.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 16 }}>
+                  <Paragraph type="secondary" style={{ marginBottom: 8 }}>
+                    暂无已收藏岗位
+                  </Paragraph>
+                  <Link to="/jobs?tab=saved">
+                    <Button type="primary" size="small" icon={<LinkOutlined />}>
+                      前往职位中心收藏岗位
+                    </Button>
+                  </Link>
+                </div>
+              ) : '请选择'}
+            />
+          </div>
+      
           {resumeErrorMessage ? (
             <Alert
               type="error"
@@ -915,16 +998,7 @@ function ResumeOptimizerPage() {
               onClose={() => setResumeErrorMessage(null)}
             />
           ) : null}
-
-          <Input
-            size="large"
-            placeholder="例如: https://www.zhipin.com/job_detail/xxx"
-            value={jobUrl}
-            onChange={(e) => setJobUrl(e.target.value)}
-            prefix={<SearchOutlined style={{ color: 'var(--color-text-muted)' }} />}
-            style={{ marginBottom: '24px' }}
-          />
-
+      
           <Space style={{ width: '100%' }}>
             <Button onClick={handleReset}>重新上传</Button>
             <Button

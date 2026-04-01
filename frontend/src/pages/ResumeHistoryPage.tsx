@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Card,
   Typography,
@@ -28,6 +29,7 @@ import {
   DeleteOutlined,
   UnlockOutlined,
   RedoOutlined,
+  ReadOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import { Link } from 'react-router-dom'
@@ -61,7 +63,9 @@ const RESUME_TASK_STATUS: Record<
 type HistoryTab = 'resume' | 'interview' | 'studyQa'
 
 function ResumeHistoryPage() {
-  const [tab, setTab] = useState<HistoryTab>('resume')
+  const [searchParams] = useSearchParams()
+  const urlTab = searchParams.get('tab') as HistoryTab | null
+  const [tab, setTab] = useState<HistoryTab>(urlTab || 'resume')
 
   const [resumeLoading, setResumeLoading] = useState(true)
   const [resumeItems, setResumeItems] = useState<ResumeHistoryListItem[]>([])
@@ -519,6 +523,20 @@ function ResumeHistoryPage() {
               >
                 下载
               </Button>
+              <Tooltip title="使用该岗位信息开始模拟面试">
+                <Link to={`/interview?resumeId=${record.id}&jobUrl=${encodeURIComponent(record.target_job_url || '')}`}>
+                  <Button type="link" size="small" icon={<AudioOutlined />}>
+                    模拟面试
+                  </Button>
+                </Link>
+              </Tooltip>
+              <Tooltip title="基于匹配度差距生成专项学习">
+                <Link to={`/learn?resumeId=${record.id}&type=resume-gap`}>
+                  <Button type="link" size="small" icon={<ReadOutlined />}>
+                    专项学习
+                  </Button>
+                </Link>
+              </Tooltip>
             </>
           ) : null}
           <Popconfirm
@@ -593,16 +611,32 @@ function ResumeHistoryPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 120,
+      width: 200,
       render: (_, record) => (
-        <Button
-          type="link"
-          size="small"
-          icon={<EyeOutlined />}
-          onClick={() => openInterviewDetail(record.session_id)}
-        >
-          查看报告
-        </Button>
+        <Space wrap size="small">
+          <Button
+            type="link"
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => openInterviewDetail(record.session_id)}
+          >
+            查看报告
+          </Button>
+          <Tooltip title="针对薄弱环节专项学习">
+            <Link to={`/learn?sessionId=${record.session_id}&type=interview-weakness`}>
+              <Button type="link" size="small" icon={<ReadOutlined />}>
+                专项学习
+              </Button>
+            </Link>
+          </Tooltip>
+          <Tooltip title="使用相同配置重新挑战">
+            <Link to={`/interview?sessionId=${record.session_id}&action=replay`}>
+              <Button type="link" size="small" icon={<RedoOutlined />}>
+                重新挑战
+              </Button>
+            </Link>
+          </Tooltip>
+        </Space>
       ),
     },
   ]
@@ -654,7 +688,7 @@ function ResumeHistoryPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 160,
+      width: 200,
       fixed: 'right',
       render: (_, record) => (
         <Space size="small">
@@ -666,6 +700,13 @@ function ResumeHistoryPage() {
           >
             详情
           </Button>
+          <Tooltip title="深入学习相关知识点">
+            <Link to={`/learn?qaId=${record.id}&type=qa-deep-learn`}>
+              <Button type="link" size="small" icon={<ReadOutlined />}>
+                深入学习
+              </Button>
+            </Link>
+          </Tooltip>
           <Popconfirm
             title="删除此条学习问答记录？"
             onConfirm={() => void handleDeleteStudyQa(record.id)}

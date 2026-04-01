@@ -21,7 +21,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=Fals
 # JWT 配置
 SECRET_KEY = getattr(settings, "JWT_SECRET_KEY", "change-me-in-production-use-random-string")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 天
+ACCESS_TOKEN_EXPIRE_MINUTES = int(getattr(settings, "JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 60 * 24))  # 默认 1 天
 
 
 def hash_password(password: str) -> str:

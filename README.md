@@ -86,12 +86,18 @@ ai-career-assistant/
 │   ├── requirements.txt     # 依赖
 │   └── main.py              # 后端入口
 ├── frontend/                # 前端代码
-│   ├── src/
+│   ├── src/                 # 源代码
 │   │   ├── pages/           # 页面
 │   │   ├── components/      # 组件
 │   │   └── services/        # API 调用
 │   └── package.json
-├── docs/                    # 文档
+├── docs/                    # 文档目录
+│   ├── bugs/                # Bug 修复记录
+│   ├── enhancements/        # 功能增强报告
+│   ├── architecture/        # 架构设计规范
+│   ├── archive/             # 历史文档归档
+│   └── scripts/             # 工具脚本
+├── AGENTS.md                # AI Agent 配置
 └── README.md                # 项目总览
 ```
 
@@ -158,6 +164,40 @@ npm run dev
 
 ### 职位搜索
 - `POST /api/jobs/search` - 多源职位列表聚合搜索（见环境变量 `JOB_SEARCH_*`）
+
+## 📚 文档导航
+
+完整的文档体系已整理到 [`docs/`](docs/) 目录下。
+
+### 快速导航
+
+| 需求 | 文档 | 路径 |
+|------|------|------|
+| 🚀 **快速开始** | SQLite 快速启动指南 | [docs/README_SQLITE.md](docs/README_SQLITE.md) |
+| 🏗️ **了解架构** | 系统架构设计 | [docs/ARCHITECTURE_SUMMARY.md](docs/ARCHITECTURE_SUMMARY.md) |
+| 🐛 **修复问题** | Bug 修复记录 | [docs/bugs/BUGFIX_RECORD.md](docs/bugs/BUGFIX_RECORD.md) |
+| 📖 **完整文档** | 文档总索引 | [docs/DOCUMENTATION_INDEX.md](docs/DOCUMENTATION_INDEX.md) |
+| 📝 **产品需求** | 产品分析报告 | [docs/PRODUCT_ANALYSIS.md](docs/PRODUCT_ANALYSIS.md) |
+
+### 文档目录结构
+
+```
+docs/
+├── README_SQLITE.md           # SQLite 快速启动
+├── SQLITE_QUICKSTART.md       # 零配置开箱即用
+├── ARCHITECTURE_SUMMARY.md    # 架构设计
+├── reading-roadmap.md         # 代码阅读路线
+├── DOCUMENTATION_INDEX.md     # 文档总索引
+├── PRODUCT_ANALYSIS.md        # 产品需求
+├── PLAN.md                    # 开发计划
+├── bugs/                      # Bug 修复记录
+├── enhancements/              # 功能增强报告
+├── architecture/              # 架构设计规范
+├── archive/                   # 历史文档归档
+└── scripts/                   # 工具脚本
+```
+
+---
 
 ## ⚠️ 注意事项
 

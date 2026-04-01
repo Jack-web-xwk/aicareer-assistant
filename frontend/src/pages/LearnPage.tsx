@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Card,
   Row,
@@ -10,6 +11,7 @@ import {
   Space,
   Tag,
   Empty,
+  Alert,
 } from 'antd'
 import { ReadOutlined, QuestionCircleOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
@@ -48,12 +50,29 @@ const markdownComponents = {
 }
 
 function LearnPage() {
+  const [searchParams] = useSearchParams()
   const [phases, setPhases] = useState<LearningPhase[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedPhaseId, setSelectedPhaseId] = useState<number | null>(null)
   const [selectedArticle, setSelectedArticle] = useState<LearningArticleDetail | null>(null)
   const [articleLoading, setArticleLoading] = useState(false)
   const [studyQaRecent, setStudyQaRecent] = useState<StudyQaSessionListItem[]>([])
+  
+  // URL 参数
+  const resumeId = searchParams.get('resumeId')
+  const sessionId = searchParams.get('sessionId')
+  const qaId = searchParams.get('qaId')
+  const learnType = searchParams.get('type')
+  
+  // 智能学习推荐状态
+  const [learningSuggestion, setLearningSuggestion] = useState<{
+    type: 'resume-gap' | 'interview-weakness' | 'qa-deep-learn'
+    title: string
+    description: string
+    resumeId?: number
+    sessionId?: string
+    qaId?: number
+  } | null>(null)
 
   const loadPhases = useCallback(async () => {
     setLoading(true)
@@ -92,6 +111,34 @@ function LearnPage() {
   useEffect(() => {
     void loadStudyQaRecent()
   }, [loadStudyQaRecent])
+  
+  // 处理 URL 参数中的智能学习推荐
+  useEffect(() => {
+    if (learnType === 'resume-gap' && resumeId) {
+      setLearningSuggestion({
+        type: 'resume-gap',
+        title: '基于简历匹配度差距的专项学习',
+        description: '根据您上传的简历与目标岗位的匹配分析，为您生成针对性的学习内容',
+        resumeId: parseInt(resumeId),
+      })
+    } else if (learnType === 'interview-weakness' && sessionId) {
+      setLearningSuggestion({
+        type: 'interview-weakness',
+        title: '基于面试薄弱环节的专项提升',
+        description: '根据您模拟面试的评估报告，针对薄弱环节推荐学习内容',
+        sessionId: sessionId,
+      })
+    } else if (learnType === 'qa-deep-learn' && qaId) {
+      setLearningSuggestion({
+        type: 'qa-deep-learn',
+        title: '学习问答深度拓展',
+        description: '基于您的学习问答记录，深入讲解相关知识点',
+        qaId: parseInt(qaId),
+      })
+    } else {
+      setLearningSuggestion(null)
+    }
+  }, [learnType, resumeId, sessionId, qaId])
 
   const currentPhase = phases.find((p) => p.id === selectedPhaseId)
 
@@ -120,6 +167,18 @@ function LearnPage() {
         </div>
       </Space>
 
+      {learningSuggestion && (
+        <Alert
+          type="success"
+          showIcon
+          style={{ marginBottom: 24 }}
+          message={learningSuggestion.title}
+          description={learningSuggestion.description}
+          closable
+          onClose={() => setLearningSuggestion(null)}
+        />
+      )}
+
       {/* 学习问答入口卡片 */}
       <Card style={{ ...cardStyle, marginBottom: 24 }}>
         <Space align="center" wrap>
@@ -130,10 +189,10 @@ function LearnPage() {
               选择已优化简历，生成面试问答；结果持久化，可在历史中查看。
             </Paragraph>
           </div>
-          <Link to="/resume/study-qa">
-            <Button type="primary">前往学习问答</Button>
+          <Link to="/resume?tab=study-qa">
+            <Button type="primary">生成学习问答</Button>
           </Link>
-          <Link to="/resume/history">
+          <Link to="/history?tab=studyQa">
             <Button>历史结果</Button>
           </Link>
         </Space>
@@ -141,7 +200,7 @@ function LearnPage() {
           <div style={{ marginTop: 12 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>最近记录：</Text>
             {studyQaRecent.map((s) => (
-              <Link key={s.id} to="/resume/history" style={{ marginLeft: 8 }}>
+              <Link key={s.id} to="/history?tab=studyQa" style={{ marginLeft: 8 }}>
                 <Tag color="blue">
                   {s.original_filename} · {s.item_count} 条
                 </Tag>

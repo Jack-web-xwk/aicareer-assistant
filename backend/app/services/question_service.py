@@ -7,7 +7,7 @@ Question Service - 题库管理服务
 import random
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, Text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -65,7 +65,7 @@ class QuestionService:
             conditions = []
             for tech in tech_stack:
                 conditions.append(
-                    QuestionBank.tech_stack.cast(str).like(f'%"{tech}"%')
+                    QuestionBank.tech_stack.cast(Text).like(f'%"{tech}"%')
                 )
             query = query.where(or_(*conditions))
 
@@ -181,7 +181,7 @@ class QuestionService:
         if tech_stack:
             for tech in tech_stack:
                 conditions.append(
-                    QuestionBank.tech_stack.cast(str).like(f'%"{tech}"%')
+                    QuestionBank.tech_stack.cast(Text).like(f'%"{tech}"%')
                 )
 
         # 关键词搜索

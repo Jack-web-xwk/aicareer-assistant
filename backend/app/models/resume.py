@@ -67,6 +67,9 @@ class Resume(Base):
     optimized_resume: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Markdown
     match_analysis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON string
     
+    # LangGraph 节点执行数据（持久化存储，支持历史回看）
+    langgraph_node_outputs: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON string
+    
     # 状态
     status: Mapped[ResumeStatus] = mapped_column(
         SQLEnum(ResumeStatus),

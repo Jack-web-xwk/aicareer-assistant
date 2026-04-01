@@ -170,13 +170,19 @@ export const resumeApi = {
     if (targetJobUrl) params.append('target_job_url', targetJobUrl)
 
     const url = `/api/resume/optimize/${resumeId}/stream?${params}`
+    const token = localStorage.getItem('token')
+    const controller = new AbortController()
+    const timeoutMs = 300000
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
 
     try {
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Accept': 'text/event-stream',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
+        signal: controller.signal,
       })
 
       if (!response.ok) {
@@ -215,7 +221,13 @@ export const resumeApi = {
       }
     } catch (error) {
       console.error('Resume SSE error:', error)
-      onError?.(error as Error)
+      if ((error as Error).name === 'AbortError') {
+        onError?.(new Error('请求超时（5分钟），请稍后重试'))
+      } else {
+        onError?.(error as Error)
+      }
+    } finally {
+      window.clearTimeout(timeoutId)
     }
   },
 
@@ -231,13 +243,13 @@ export const resumeApi = {
     limit = 20
   ): Promise<
     ApiResponse<{
-      resumes: ResumeUploadListItem[]
+      items: ResumeUploadListItem[]
       total: number
       skip: number
       limit: number
     }>
   > => {
-    const response = await api.get(`/resume?skip=${skip}&limit=${limit}`)
+    const response = await api.get(`/resume/history?skip=${skip}&limit=${limit}`)
     return response.data
   },
 
@@ -388,17 +400,20 @@ export const jobScrapeApi = {
     const response = await api.post('/jobs/scrape-url', { url }, { timeout: 300000 })
     return response.data
   },
-  /** 上传截图 → 多模态识别并写入 saved_jobs */
+  /** 上传截图 → 多模态识别并写入 saved_jobs（支持多张） */
   fromScreenshot: async (
-    file: File
+    files: File[]
   ): Promise<
     ApiResponse<{
       saved: SavedJobRecord
       job_snapshot: Record<string, unknown>
+      uploaded_count: number
     }>
   > => {
     const form = new FormData()
-    form.append('file', file)
+    files.forEach(file => {
+      form.append('files', file)
+    })
     // 与默认 headers 的 application/json 冲突时必须显式 multipart，否则后端收不到 file（422）
     const response = await api.post('/jobs/from-screenshot', form, {
       timeout: 300000,
@@ -416,7 +431,7 @@ export const interviewApi = {
   start: async (
     request: InterviewStartRequest
   ): Promise<ApiResponse<InterviewSession>> => {
-    const response = await api.post('/interview/start', request)
+    const response = await api.post('/interview/start', request, { timeout: 300000 })
     return response.data
   },
 
@@ -447,13 +462,19 @@ export const interviewApi = {
     if (audioBase64) params.append('audio_base64', audioBase64)
     
     const url = `/api/interview/${sessionId}/answer/stream?${params}`
+    const token = localStorage.getItem('token')
+    const controller = new AbortController()
+    const timeoutMs = 300000
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
     
     try {
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Accept': 'text/event-stream',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
+        signal: controller.signal,
       })
       
       if (!response.ok) {
@@ -494,7 +515,13 @@ export const interviewApi = {
       }
     } catch (error) {
       console.error('SSE error:', error)
-      onError?.(error as Error)
+      if ((error as Error).name === 'AbortError') {
+        onError?.(new Error('请求超时（5分钟），请稍后重试'))
+      } else {
+        onError?.(error as Error)
+      }
+    } finally {
+      window.clearTimeout(timeoutId)
     }
   },
 
@@ -551,7 +578,18 @@ export const interviewApi = {
 
 // SSE Message Types
 export interface SSEMessage {
-  type: 'start' | 'processing' | 'response' | 'done' | 'error'
+  type:
+    | 'start'
+    | 'processing'
+    | 'response'
+    | 'done'
+    | 'error'
+    | 'round_progress'
+    | 'transcript_partial'
+    | 'transcript_final'
+    | 'interviewer_reply'
+    | 'interviewer_audio'
+    | 'session_completed'
   message?: string
   session_id?: string
   is_finished?: boolean
@@ -561,6 +599,16 @@ export interface SSEMessage {
   audio_base64?: string
   transcript?: string
   report?: InterviewReport
+  data?: {
+    round?: number
+    min_rounds?: number
+    max_rounds?: number
+    phase?: 'intro' | 'technical_core' | 'deep_dive' | 'wrap_up'
+    can_finish?: boolean
+    text?: string
+    audio_base64?: string
+    done?: boolean
+  }
 }
 
 // ============================================================================

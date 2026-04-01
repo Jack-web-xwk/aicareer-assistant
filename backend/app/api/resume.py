@@ -57,13 +57,14 @@ async def list_optimization_history(
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     简历任务总览：返回当前用户全部简历记录（上传、解析、待优化、优化中、已完成、失败）。
     按「优化中 > 解析中 > 上传 > 待优化 > 失败 > 已完成」优先级 + 更新时间倒序。
     不含完整正文，详情请用 GET /resume/{id}。
     """
-    user = await get_or_create_user(db)
+    user = current_user
 
     count_result = await db.execute(
         select(func.count())
@@ -152,6 +153,7 @@ async def upload_resume(
     file: UploadFile = File(..., description="简历文件（PDF/Word）"),
     target_job_url: Optional[str] = Form(None, description="目标岗位链接"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     上传简历文件
@@ -189,7 +191,7 @@ async def upload_resume(
     
     try:
         # 获取用户
-        user = await get_or_create_user(db)
+        user = current_user
         logger.debug(f"获取用户: {user.email}")
         
         # 保存文件
@@ -259,6 +261,7 @@ async def optimize_resume(
     resume_id: int,
     target_job_url: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     优化简历（异步）
@@ -291,7 +294,7 @@ async def optimize_resume(
             detail="Resume has not been parsed. Please re-upload.",
         )
 
-    user = await get_or_create_user(db)
+    user = current_user
     try:
         resume.status = ResumeStatus.OPTIMIZING
         resume.target_job_url = job_url
@@ -403,7 +406,9 @@ async def optimize_resume_stream(
                 final_match_analysis = None
                 final_optimized_resume = ""
                 has_error = False
-
+                # 收集 LangGraph 节点输出数据（用于持久化）
+                node_outputs_map = {}
+                
                 try:
                     async for event in agent.run_stream(
                         resume_text=r.original_text or "",
@@ -411,6 +416,16 @@ async def optimize_resume_stream(
                         job_url=job_url,
                     ):
                         event_type = event.get("type")
+                                        
+                        # 收集节点完成事件的数据
+                        if event_type == "node_complete" and event.get("node"):
+                            node_key = event["node"]
+                            node_outputs_map[node_key] = {
+                                "data": event.get("data"),
+                                "thinking": event.get("thinking"),
+                                "raw_preview": event.get("raw_preview"),
+                            }
+                                        
                         if event_type == "done":
                             final_extracted_info = event.get("extracted_info")
                             final_match_analysis = event.get("match_analysis")
@@ -421,13 +436,13 @@ async def optimize_resume_stream(
                             r.error_message = event.get("message", "Unknown stream error")
                             await session.commit()
                             logger.error(
-                                "流式简历优化失败: resume_id=%s, error=%s",
+                                "流式简历优化失败：resume_id=%s, error=%s",
                                 resume_id,
                                 r.error_message,
                             )
-
+                
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-
+                
                     if not has_error:
                         await session.refresh(r)
                         if r.status != ResumeStatus.OPTIMIZING:
@@ -445,6 +460,11 @@ async def optimize_resume_stream(
                             final_match_analysis or {}, ensure_ascii=False
                         )
                         r.optimized_resume = final_optimized_resume
+                        # 保存 LangGraph 节点输出数据
+                        if node_outputs_map:
+                            r.langgraph_node_outputs = json.dumps(
+                                node_outputs_map, ensure_ascii=False
+                            )
                         await session.commit()
                         logger.info("流式简历优化完成，resume_id=%s", resume_id)
                 except Exception as e:
@@ -476,12 +496,13 @@ async def optimize_resume_stream(
 async def unlock_resume_optimization(
     resume_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     将卡在「优化中」的任务恢复为「已解析」，便于重新发起流式优化（例如页面关闭导致 SSE 中断）。
     仅允许操作属于当前默认用户的简历。
     """
-    user = await get_or_create_user(db)
+    user = current_user
     result = await db.execute(
         select(Resume).where(Resume.id == resume_id, Resume.user_id == user.id)
     )
@@ -510,11 +531,12 @@ async def list_study_qa_sessions(
     limit: int = 50,
     resume_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     学习问答生成记录列表（当前用户）；可选按 resume_id 过滤（如取某简历最新一条时 limit=1）。
     """
-    user = await get_or_create_user(db)
+    user = current_user
 
     base = (
         select(ResumeStudyQaSession, Resume)
@@ -579,9 +601,10 @@ async def list_study_qa_sessions(
 async def get_study_qa_session(
     session_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """单条学习问答详情（含完整 items 与关联简历摘要）。"""
-    user = await get_or_create_user(db)
+    user = current_user
     result = await db.execute(
         select(ResumeStudyQaSession, Resume)
         .join(Resume, ResumeStudyQaSession.resume_id == Resume.id)
@@ -623,8 +646,9 @@ async def get_study_qa_session(
 async def delete_study_qa_session(
     session_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    user = await get_or_create_user(db)
+    user = current_user
     result = await db.execute(
         select(ResumeStudyQaSession).where(
             ResumeStudyQaSession.id == session_id,
@@ -646,11 +670,12 @@ async def delete_study_qa_session(
 async def generate_resume_study_qa_endpoint(
     resume_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     根据已完成优化的简历任务（岗位描述、匹配分析、优化稿）生成学习/面试准备问答，并持久化。
     """
-    user = await get_or_create_user(db)
+    user = current_user
     result = await db.execute(
         select(Resume).where(Resume.id == resume_id, Resume.user_id == user.id)
     )
@@ -816,6 +841,7 @@ async def get_resume(
             "optimized_resume": resume.optimized_resume,
             "job_description": resume.job_description,
             "job_snapshot": json.loads(resume.job_snapshot) if resume.job_snapshot else None,
+            "langgraph_node_outputs": json.loads(resume.langgraph_node_outputs) if resume.langgraph_node_outputs else None,
             "error_message": resume.error_message,
             "created_at": resume.created_at.isoformat(),
             "updated_at": resume.updated_at.isoformat(),
@@ -873,12 +899,13 @@ async def list_resumes(
     skip: int = 0,
     limit: int = 20,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     获取简历列表
     """
-    logger.info(f"获取简历列表，跳过: {skip}, 限制: {limit}")
-    user = await get_or_create_user(db)
+    logger.info(f"获取简历列表，跳过：{skip}, 限制：{limit}")
+    user = current_user
 
     count_result = await db.execute(
         select(func.count()).select_from(Resume).where(Resume.user_id == user.id)

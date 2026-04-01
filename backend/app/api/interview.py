@@ -20,6 +20,8 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.redis_client import get_redis_client
 from app.models.interview import InterviewRecord, InterviewStatus
+from app.models.resume import Resume, ResumeStatus
+from app.models.saved_job import SavedJob
 from app.models.user import User
 from app.models.schemas import (
     InterviewStartRequest,
@@ -29,6 +31,7 @@ from app.models.schemas import (
 )
 from app.agents.interview_agent import InterviewAgent, InterviewState
 from app.services.question_service import QuestionService
+from app.services.interview_runtime import InterviewRuntimeV2
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -49,6 +52,13 @@ _active_ws_connections: Dict[str, WebSocket] = {}
 
 # 心跳超时阈值（秒）：超过该时间无活动则断开
 WS_HEARTBEAT_TIMEOUT = 60
+
+
+def _get_runtime_v2() -> InterviewRuntimeV2:
+    return InterviewRuntimeV2(
+        min_rounds=settings.INTERVIEW_MIN_ROUNDS,
+        max_rounds=settings.MAX_INTERVIEW_QUESTIONS,
+    )
 
 
 async def get_session_from_redis(session_id: str) -> Optional[InterviewState]:
@@ -105,17 +115,142 @@ async def get_or_create_user(db: AsyncSession, current_user: User = Depends(get_
 async def start_interview(
     request: InterviewStartRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     开始面试
     
     创建面试会话，初始化面试官，返回第一个问题。
+    支持两种模式：
+    1. 常规模式：手动填写岗位和技术栈
+    2. 简历关联模式：通过 resume_id 自动填充岗位详细信息
     """
-    logger.info(f"开始面试，岗位: {request.job_role}, 技术栈: {request.tech_stack}")
+    logger.info(f"开始面试，岗位：{request.job_role}, 技术栈：{request.tech_stack}")
     try:
         # 获取用户
-        user = await get_or_create_user(db)
-        logger.debug(f"获取用户: {user.email}")
+        user = current_user
+        logger.debug(f"获取用户：{user.email}")
+        
+        # 组装面试上下文（优先级：手动 JD > 已保存岗位 > 简历快照）
+        context_resume_id = request.context_resume_id or request.resume_id
+        company_name = request.company_name
+        company_business = request.company_business
+        salary_text = None
+        location = None
+        job_description_full = (request.job_description_override or "").strip() or None
+        job_snapshot_data: Optional[dict] = None
+        candidate_strengths: List[str] = []
+        candidate_weaknesses: List[str] = []
+
+        # 1) 简历上下文（仅允许 optimized）
+        if context_resume_id:
+            logger.info(f"加载面试上下文简历：{context_resume_id}")
+            resume_result = await db.execute(
+                select(Resume).where(
+                    Resume.id == context_resume_id,
+                    Resume.user_id == user.id,  # 确保是用户的简历
+                )
+            )
+            resume = resume_result.scalar_one_or_none()
+            
+            if not resume:
+                raise HTTPException(status_code=400, detail="所选简历不存在或无权限访问")
+            if resume.status != ResumeStatus.OPTIMIZED:
+                raise HTTPException(status_code=400, detail="仅支持选择已优化（optimized）的简历")
+
+            if resume:
+                # 从简历的 job_snapshot 中提取岗位信息
+                if resume.job_snapshot:
+                    try:
+                        job_snapshot_data = json.loads(resume.job_snapshot)
+                        if not company_name:
+                            company_name = job_snapshot_data.get("company") or job_snapshot_data.get("company_name")
+                        salary_text = job_snapshot_data.get("salary") or job_snapshot_data.get("salary_text")
+                        location = job_snapshot_data.get("location")
+                        if not company_business:
+                            company_business = job_snapshot_data.get("industry")
+                        if not job_description_full:
+                            job_description_full = resume.job_description
+                        logger.info(f"从简历快照中提取到公司：{company_name}")
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.warning(f"解析 job_snapshot 失败：{e}")
+                
+                # 如果没有 job_snapshot，使用基本字段
+                if not company_name and resume.target_job_title:
+                    company_name = resume.target_job_title.split("-")[0].strip() if "-" in resume.target_job_title else None
+                if not job_description_full:
+                    job_description_full = resume.job_description
+
+                # 提取候选人优势/弱点（来自简历优化匹配结果）
+                if resume.match_analysis:
+                    try:
+                        match_analysis = json.loads(resume.match_analysis)
+                        candidate_strengths = match_analysis.get("strengths", []) or []
+                        candidate_weaknesses = match_analysis.get("areas_to_improve", []) or []
+                    except (json.JSONDecodeError, TypeError):
+                        logger.warning("解析 match_analysis 失败，忽略候选人优势短板")
+
+        # 2) 已保存岗位上下文（高于简历快照，低于手动 JD）
+        if request.saved_job_id:
+            saved_result = await db.execute(
+                select(SavedJob).where(
+                    SavedJob.id == request.saved_job_id,
+                    SavedJob.user_id == user.id,
+                )
+            )
+            saved_job = saved_result.scalar_one_or_none()
+            if not saved_job:
+                raise HTTPException(status_code=400, detail="所选岗位不存在或无权限访问")
+
+            if saved_job.raw_snippet:
+                try:
+                    saved_snapshot = json.loads(saved_job.raw_snippet)
+                    if isinstance(saved_snapshot, dict):
+                        job_snapshot_data = saved_snapshot
+                        if not company_name:
+                            company_name = (
+                                saved_snapshot.get("company")
+                                or saved_snapshot.get("company_name")
+                                or saved_job.company_name
+                            )
+                        if not company_business:
+                            company_business = saved_snapshot.get("industry")
+                        salary_text = saved_snapshot.get("salary") or saved_job.salary_text
+                        location = saved_snapshot.get("location") or saved_job.location
+                        if not job_description_full:
+                            jd_parts = []
+                            responsibilities = saved_snapshot.get("responsibilities") or []
+                            qualifications = saved_snapshot.get("qualifications") or []
+                            if responsibilities:
+                                jd_parts.append("岗位职责：\n" + "\n".join(f"- {x}" for x in responsibilities))
+                            if qualifications:
+                                jd_parts.append("任职要求：\n" + "\n".join(f"- {x}" for x in qualifications))
+                            if jd_parts:
+                                job_description_full = "\n\n".join(jd_parts)
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning("解析 saved_job.raw_snippet 失败，回退基础字段")
+            else:
+                if not company_name:
+                    company_name = saved_job.company_name
+                salary_text = saved_job.salary_text
+                location = saved_job.location
+                if not job_description_full:
+                    job_description_full = f"经验要求：{saved_job.experience_text}\n学历要求：{saved_job.education_text}"
+
+        # 手动字段强制覆盖
+        if request.company_name:
+            company_name = request.company_name
+        if request.company_business:
+            company_business = request.company_business
+
+        # 写回快照（补齐 company_business）
+        if not job_snapshot_data:
+            job_snapshot_data = {}
+        if company_name and not job_snapshot_data.get("company_name"):
+            job_snapshot_data["company_name"] = company_name
+        if company_business:
+            job_snapshot_data["company_business"] = company_business
+        job_snapshot = json.dumps(job_snapshot_data, ensure_ascii=False) if job_snapshot_data else None
         
         # 创建会话 ID
         session_id = str(uuid.uuid4())
@@ -137,19 +272,30 @@ async def start_interview(
             tech_stack=request.tech_stack,
             difficulty_level=request.difficulty_level,
             max_questions=settings.MAX_INTERVIEW_QUESTIONS,
+            company_name=company_name,
+            company_business=company_business,
+            job_description=job_description_full,
+            candidate_strengths=candidate_strengths,
+            candidate_weaknesses=candidate_weaknesses,
         )
         logger.debug("面试智能体初始化完成")
         
         # 存储会话状态（Dual-write: 内存 + Redis）
         await save_session_to_redis(session_id, state)
         
-        # 创建数据库记录
+        # 创建数据库记录（包含岗位详细信息）
         record = InterviewRecord(
             session_id=session_id,
             user_id=user.id,
+            resume_id=request.resume_id,  # 关联简历 ID
             job_role=request.job_role,
             tech_stack=json.dumps(request.tech_stack, ensure_ascii=False),
             difficulty_level=request.difficulty_level,
+            company_name=company_name,
+            salary_text=salary_text,
+            location=location,
+            job_description_full=job_description_full,
+            job_snapshot=job_snapshot,
             conversation_history=json.dumps(
                 state.get("conversation_history", []),
                 ensure_ascii=False,
@@ -162,7 +308,7 @@ async def start_interview(
         await db.commit()
         await db.refresh(record)
         
-        logger.info(f"面试开始成功，会话 ID: {session_id}")
+        logger.info(f"面试已成功启动，会话 ID: {session_id}")
         return SuccessResponse(
             success=True,
             message="Interview started successfully",
@@ -175,11 +321,17 @@ async def start_interview(
                 "question_number": state.get("question_count", 1),
                 "total_questions": settings.MAX_INTERVIEW_QUESTIONS,
                 "audio_base64": state.get("audio_output"),
+                # 返回岗位详细信息，供前端展示
+                "company_name": company_name,
+                "salary_text": salary_text,
+                "location": location,
+                "company_business": company_business,
+                "job_snapshot": json.loads(job_snapshot) if job_snapshot else None,
             },
         )
     
     except Exception as e:
-        logger.error(f"开始面试失败: {str(e)}", exc_info=True)
+        logger.error(f"开始面试失败：{str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to start interview: {str(e)}",
@@ -202,6 +354,7 @@ async def submit_answer_stream(
     
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
+            runtime = _get_runtime_v2() if settings.INTERVIEW_RUNTIME_V2_ENABLED else None
             # 获取会话状态（优先 Redis）
             state = await get_session_from_redis(session_id)
             
@@ -215,6 +368,8 @@ async def submit_answer_stream(
             
             # 发送开始事件
             yield f"data: {json.dumps({'type': 'start', 'message': 'Processing your answer...'}, ensure_ascii=False)}\n\n"
+            if runtime:
+                yield f"data: {json.dumps({'type': 'round_progress', 'data': runtime.build_round_progress(state)}, ensure_ascii=False)}\n\n"
             
             # 创建智能体
             agent = InterviewAgent()
@@ -229,6 +384,12 @@ async def submit_answer_stream(
                 audio_input=audio_base64,
                 text_input=text_answer,
             )
+            if runtime:
+                new_state = runtime.enforce_finish_guardrails(
+                    prev_state=state,
+                    next_state=new_state,
+                    force_end=False,
+                )
             logger.debug("回答处理完成")
             
             # 更新会话状态（Dual-write: 内存 + Redis）
@@ -270,7 +431,16 @@ async def submit_answer_stream(
                 
                 await db.commit()
             
-            # 发送结果事件
+            # 发送 v2 事件（转写 / 轮次 / 回复 / 音频 / 完成）
+            if runtime:
+                for evt in runtime.build_events(
+                    prev_state=state,
+                    new_state=new_state,
+                    transcript_text=new_state.get("current_answer"),
+                ):
+                    yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
+
+            # 发送兼容结果事件（保留旧前端）
             response_data = {
                 "type": "response",
                 "session_id": session_id,
@@ -434,12 +604,13 @@ async def list_interview_history(
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     历史结果：仅返回当前用户已完成的模拟面试（含评估报告），按结束时间倒序。
     完整报告请用 GET /interview/{session_id}/report。
     """
-    user = await get_or_create_user(db)
+    user = current_user
 
     count_result = await db.execute(
         select(func.count())
@@ -710,6 +881,7 @@ async def interview_websocket(
 
     # 创建智能体
     agent = InterviewAgent()
+    runtime = _get_runtime_v2() if settings.INTERVIEW_RUNTIME_V2_ENABLED else None
 
     # ========== 2. 心跳检测：跟踪最后活动时间 ==========
     last_heartbeat = __import__("time").time()
@@ -753,6 +925,12 @@ async def interview_websocket(
                     state=state,
                     audio_input=audio_base64,
                 )
+                if runtime:
+                    new_state = runtime.enforce_finish_guardrails(
+                        prev_state=state,
+                        next_state=new_state,
+                        force_end=False,
+                    )
 
             elif msg_type == "text":
                 # 处理文本输入
@@ -762,6 +940,12 @@ async def interview_websocket(
                     state=state,
                     text_input=text_content,
                 )
+                if runtime:
+                    new_state = runtime.enforce_finish_guardrails(
+                        prev_state=state,
+                        next_state=new_state,
+                        force_end=False,
+                    )
 
             elif msg_type == "end":
                 # 提前结束
@@ -780,8 +964,18 @@ async def interview_websocket(
                 continue
 
             # 更新会话状态（Dual-write）
+            prev_state = state
             state = new_state
             await save_session_to_redis(session_id, state)
+
+            # 发送 v2 事件
+            if runtime:
+                for evt in runtime.build_events(
+                    prev_state=prev_state,
+                    new_state=state,
+                    transcript_text=state.get("current_answer"),
+                ):
+                    await websocket.send_json(evt)
 
             # 发送响应
             response = {
@@ -853,12 +1047,13 @@ async def list_interviews(
     skip: int = 0,
     limit: int = 20,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     获取面试记录列表
     """
-    logger.info(f"获取面试记录列表，跳过: {skip}, 限制: {limit}")
-    user = await get_or_create_user(db)
+    logger.info(f"获取面试记录列表，跳过：{skip}, 限制：{limit}")
+    user = current_user
     
     result = await db.execute(
         select(InterviewRecord)

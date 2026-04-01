@@ -55,6 +55,7 @@ export interface ResumeInfo {
   extracted_info?: ExtractedResumeInfo
   match_analysis?: MatchAnalysis
   optimized_resume?: string
+  langgraph_node_outputs?: Record<string, any> | null  // LangGraph 节点执行数据（持久化）
   error_message?: string | null
   created_at: string
   updated_at: string
@@ -262,6 +263,10 @@ export interface InterviewSession {
   question_number: number
   total_questions: number
   audio_base64?: string
+  company_name?: string | null
+  company_business?: string | null
+  location?: string | null
+  job_snapshot?: Record<string, unknown> | null
   is_finished: boolean
 }
 
@@ -271,6 +276,12 @@ export interface InterviewStartRequest {
   job_role: string
   tech_stack: string[]
   difficulty_level: 'easy' | 'medium' | 'hard'
+  resume_id?: number  // 可选：从简历优化跳转时传入
+  context_resume_id?: number
+  saved_job_id?: number
+  company_name?: string
+  company_business?: string
+  job_description_override?: string
 }
 
 export interface InterviewAnswerRequest {
@@ -302,7 +313,16 @@ export interface InterviewMessage {
 // WebSocket Message Types
 
 export interface WSMessage {
-  type: 'init' | 'response' | 'error'
+  type:
+    | 'init'
+    | 'response'
+    | 'error'
+    | 'round_progress'
+    | 'transcript_partial'
+    | 'transcript_final'
+    | 'interviewer_reply'
+    | 'interviewer_audio'
+    | 'session_completed'
   session_id?: string
   job_role?: string
   current_question?: string
@@ -312,6 +332,16 @@ export interface WSMessage {
   is_finished?: boolean
   report?: InterviewReport
   message?: string
+  data?: {
+    round?: number
+    min_rounds?: number
+    max_rounds?: number
+    phase?: 'intro' | 'technical_core' | 'deep_dive' | 'wrap_up'
+    can_finish?: boolean
+    text?: string
+    audio_base64?: string
+    done?: boolean
+  }
 }
 
 export interface WSAudioMessage {
@@ -331,7 +361,18 @@ export interface WSEndMessage {
 // SSE Message Types
 
 export interface SSEMessage {
-  type: 'start' | 'processing' | 'response' | 'done' | 'error'
+  type:
+    | 'start'
+    | 'processing'
+    | 'response'
+    | 'done'
+    | 'error'
+    | 'round_progress'
+    | 'transcript_partial'
+    | 'transcript_final'
+    | 'interviewer_reply'
+    | 'interviewer_audio'
+    | 'session_completed'
   message?: string
   session_id?: string
   is_finished?: boolean
@@ -341,6 +382,16 @@ export interface SSEMessage {
   audio_base64?: string
   transcript?: string
   report?: InterviewReport
+  data?: {
+    round?: number
+    min_rounds?: number
+    max_rounds?: number
+    phase?: 'intro' | 'technical_core' | 'deep_dive' | 'wrap_up'
+    can_finish?: boolean
+    text?: string
+    audio_base64?: string
+    done?: boolean
+  }
 }
 
 // Job search (multi-source aggregation)

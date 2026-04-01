@@ -13,6 +13,7 @@ from .jobs import router as jobs_router
 from .learn import router as learn_router
 from .question_bank import router as question_bank_router
 from .auth import router as auth_router
+from .progress_dashboard import router as progress_dashboard_router
 
 # 创建主路由
 router = APIRouter()
@@ -25,5 +26,6 @@ router.include_router(interview_router, prefix="/interview", tags=["Interview"])
 router.include_router(jobs_router, prefix="/jobs", tags=["Jobs"])
 router.include_router(learn_router, prefix="/learn", tags=["Learn"])
 router.include_router(question_bank_router, prefix="/question-bank", tags=["Question Bank"])
+router.include_router(progress_dashboard_router, prefix="/interview", tags=["Progress Dashboard"])
 
 __all__ = ["router"]

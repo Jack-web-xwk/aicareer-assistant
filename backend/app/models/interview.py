@@ -51,6 +51,21 @@ class InterviewRecord(Base):
     tech_stack: Mapped[str] = mapped_column(Text)  # 技术栈（JSON array）
     difficulty_level: Mapped[str] = mapped_column(String(50), default="medium")  # easy/medium/hard
     
+    # 关联的简历 ID（可选，用于从简历优化跳转）
+    resume_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("resumes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    
+    # 岗位详细信息（从简历或 saved_jobs 关联获取）
+    company_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # 公司名称
+    salary_text: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # 薪资范围
+    location: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # 工作地点
+    job_description_full: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # 完整 JD
+    job_snapshot: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # 岗位快照 JSON
+    
     # 对话记录
     conversation_history: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
     question_count: Mapped[int] = mapped_column(Integer, default=0)

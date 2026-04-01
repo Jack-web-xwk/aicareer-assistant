@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     
     # Interview Settings
     MAX_INTERVIEW_QUESTIONS: int = 5
+    INTERVIEW_RUNTIME_V2_ENABLED: bool = True
+    INTERVIEW_MIN_ROUNDS: int = 4
 
     # ========== Redis Configuration ==========
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -103,6 +105,7 @@ class Settings(BaseSettings):
 
     # ========== JWT Configuration ==========
     JWT_SECRET_KEY: str = ""  # 留空则自动生成随机字符串
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 1 day
 
     # ========== Streaming Audio Configuration ==========
     STREAMING_AUDIO_ENABLED: bool = True

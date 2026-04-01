@@ -36,8 +36,8 @@ function ResumeStudyQaPage() {
     setListLoading(true)
     try {
       const res = await resumeApi.list(0, 200)
-      if (res.success && res.data?.resumes) {
-        const opt = res.data.resumes.filter((r) => r.status === 'optimized')
+      if (res.success && res.data?.items) {
+        const opt = res.data.items.filter((r) => r.status === 'optimized')
         setOptimizedList(opt)
         setSelectedResumeId((prev) => {
           if (prev != null) return prev

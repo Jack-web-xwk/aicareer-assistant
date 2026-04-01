@@ -51,6 +51,9 @@ export default function TargetJobUrlPage() {
       if (loading) return
       const items = e.clipboardData?.items
       if (!items?.length) return
+      
+      const imageFiles: UploadFile[] = []
+      
       for (let i = 0; i < items.length; i++) {
         const item = items[i]
         if (item.kind === 'file' && item.type.startsWith('image/')) {
@@ -58,20 +61,22 @@ export default function TargetJobUrlPage() {
           if (!blob) continue
           e.preventDefault()
           const sub = blob.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png'
-          const file = new File([blob], `paste-${Date.now()}.${sub}`, {
+          const file = new File([blob], `paste-${Date.now()}-${i}.${sub}`, {
             type: blob.type || 'image/png',
           })
-          setFileList([
-            {
-              uid: `paste-${Date.now()}`,
-              name: file.name,
-              status: 'done',
-              originFileObj: file as unknown as UploadFile['originFileObj'],
-            },
-          ])
-          message.success('已粘贴截图，可点击「识别截图并保存」')
-          return
+          imageFiles.push({
+            uid: `paste-${Date.now()}-${i}`,
+            name: file.name,
+            status: 'done',
+            originFileObj: file as unknown as UploadFile['originFileObj'],
+          })
         }
+      }
+      
+      if (imageFiles.length > 0) {
+        // 追加到现有文件列表，支持同时粘贴多张图片
+        setFileList((prev) => [...prev, ...imageFiles])
+        message.success(`已粘贴 ${imageFiles.length} 张截图，可点击「识别截图并保存」`)
       }
     },
     [loading]
@@ -111,15 +116,18 @@ export default function TargetJobUrlPage() {
   }
 
   const handleScreenshotUpload = async () => {
-    const f = fileList[0]?.originFileObj
-    if (!f || !(f instanceof File)) {
-      message.warning('请先选择一张截图')
+    const files = fileList
+      .map((f) => f.originFileObj as File | undefined)
+      .filter((f): f is File => !!f)
+    
+    if (!files.length) {
+      message.warning('请先选择至少一张截图')
       return
     }
     setLoading(true)
     resetResult()
     try {
-      const res = await jobScrapeApi.fromScreenshot(f)
+      const res = await jobScrapeApi.fromScreenshot(files)
       if (!res.success || !res.data) {
         message.error(res.message || '请求失败')
         return
@@ -127,11 +135,12 @@ export default function TargetJobUrlPage() {
       const data = res.data as {
         saved: SavedJobRecord
         job_snapshot: Record<string, unknown>
+        uploaded_count: number
       }
       setSaved(data.saved)
       setSnapshot(data.job_snapshot)
       setFileList([])
-      message.success('已从截图识别并保存到「我的职位」')
+      message.success(`已从 ${data.uploaded_count} 张截图中识别并保存到「我的职位」`)
     } catch (e) {
       message.error((e as Error).message)
     } finally {
@@ -227,7 +236,7 @@ export default function TargetJobUrlPage() {
               </Paragraph>
               <Dragger
                 accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
-                maxCount={1}
+                multiple
                 fileList={fileList}
                 beforeUpload={() => false}
                 onChange={({ fileList: fl }) => setFileList(fl)}
@@ -238,7 +247,7 @@ export default function TargetJobUrlPage() {
                 </p>
                 <p className="ant-upload-text">点击或拖拽图片到此处</p>
                 <p className="ant-upload-hint">
-                  单张图片，建议竖屏长截图包含完整 JD；也可在页面按 Ctrl+V 粘贴
+                  支持多张图片同时上传，建议竖屏长截图包含完整 JD；也可在页面按 Ctrl+V 粘贴
                 </p>
               </Dragger>
               <Button

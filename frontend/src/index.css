@@ -1,5 +1,7 @@
 /* AI Career Assistant - Global Styles (light, comfortable reading) */
 
+@import './styles/responsive.css';
+
 :root {
   --color-primary: #4f46e5;
   --color-primary-light: #6366f1;
@@ -239,4 +241,3 @@ body {
 /* ============================================================================
    Pod-C: 响应式设计样式
    ============================================================================ */
-@import './styles/responsive.css';

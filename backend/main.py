@@ -16,6 +16,7 @@ from app.middleware.security import RequestSizeLimitMiddleware, GlobalExceptionM
 from app.core.config import settings
 from app.core.database import create_tables, ensure_sqlite_schema
 from app.core.database import async_session_maker
+from app.core.redis_client import init_redis, close_redis
 from app.services.resume_optimization_job import recover_resume_optimizations_on_startup
 from app.services.learning_seed import seed_learning_if_empty
 from app.core.exception_handlers import register_exception_handlers
@@ -48,6 +49,13 @@ async def lifespan(app: FastAPI):
     data_dir = Path("./data")
     data_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"数据目录创建完成: {data_dir}")
+
+    # Startup: 初始化 Redis（失败时自动回退内存，不阻断启动）
+    try:
+        await init_redis()
+        logger.info("Redis 初始化成功")
+    except Exception as e:
+        logger.warning(f"Redis 初始化失败，已回退内存模式: {e}")
     
     await recover_resume_optimizations_on_startup()
 
@@ -62,6 +70,10 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown: 清理资源
+    try:
+        await close_redis()
+    except Exception as e:
+        logger.warning(f"Redis 关闭失败: {e}")
     logger.info(f"👋 {settings.APP_NAME} shutting down...")
 
 

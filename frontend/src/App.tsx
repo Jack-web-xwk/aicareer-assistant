@@ -7,8 +7,6 @@ import {
   RocketOutlined,
   HistoryOutlined,
   SearchOutlined,
-  AimOutlined,
-  FolderOpenOutlined,
   ReadOutlined,
   UserOutlined,
   LogoutOutlined,
@@ -17,11 +15,8 @@ import { useState, useEffect } from 'react'
 import HomePage from './pages/HomePage'
 import ResumeOptimizerPage from './pages/ResumeOptimizerPage'
 import ResumeHistoryPage from './pages/ResumeHistoryPage'
-import ResumeStudyQaPage from './pages/ResumeStudyQaPage'
 import InterviewSimulatorPage from './pages/InterviewSimulatorPage'
-import JobsPage from './pages/JobsPage'
-import SavedJobsPage from './pages/SavedJobsPage'
-import TargetJobUrlPage from './pages/TargetJobUrlPage'
+import JobsCenterPage from './pages/JobsCenterPage'
 import LearnPage from './pages/LearnPage'
 import AuthPage from './pages/AuthPage'
 import OnboardingGuide from './components/OnboardingGuide'
@@ -38,12 +33,10 @@ interface UserInfo {
 
 function menuSelectedKey(pathname: string): string {
   if (pathname.startsWith('/learn')) return '/learn'
-  if (pathname.startsWith('/resume/study-qa')) return '/resume/study-qa'
-  if (pathname.startsWith('/resume/history')) return '/resume/history'
-  if (pathname.startsWith('/target-jobs')) return '/target-jobs'
-  if (pathname.startsWith('/jobs/saved')) return '/jobs/saved'
-  if (pathname.startsWith('/jobs')) return '/jobs'
+  if (pathname.startsWith('/history')) return '/history'
+  if (pathname.startsWith('/interview')) return '/interview'
   if (pathname.startsWith('/resume')) return '/resume'
+  if (pathname.startsWith('/jobs')) return '/jobs'
   return pathname
 }
 
@@ -107,27 +100,12 @@ function AppLayout() {
     {
       key: '/jobs',
       icon: <SearchOutlined />,
-      label: <Link to="/jobs">职位搜索</Link>,
-    },
-    {
-      key: '/target-jobs',
-      icon: <AimOutlined />,
-      label: <Link to="/target-jobs">目标岗位</Link>,
-    },
-    {
-      key: '/jobs/saved',
-      icon: <FolderOpenOutlined />,
-      label: <Link to="/jobs/saved">我的职位</Link>,
+      label: <Link to="/jobs">职位中心</Link>,
     },
     {
       key: '/resume',
       icon: <FileTextOutlined />,
       label: <Link to="/resume">简历优化</Link>,
-    },
-    {
-      key: '/resume/history',
-      icon: <HistoryOutlined />,
-      label: <Link to="/resume/history">历史结果</Link>,
     },
     {
       key: '/interview',
@@ -137,7 +115,12 @@ function AppLayout() {
     {
       key: '/learn',
       icon: <ReadOutlined />,
-      label: <Link to="/learn">学无止境</Link>,
+      label: <Link to="/learn">学习中心</Link>,
+    },
+    {
+      key: '/history',
+      icon: <HistoryOutlined />,
+      label: <Link to="/history">历史结果</Link>,
     },
   ]
 
@@ -222,14 +205,13 @@ function AppLayout() {
         <Routes>
           <Route path="/auth" element={<AuthPage onLogin={handleLogin} />} />
           <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
-          <Route path="/jobs/saved" element={<ProtectedRoute><SavedJobsPage /></ProtectedRoute>} />
-          <Route path="/jobs" element={<ProtectedRoute><JobsPage /></ProtectedRoute>} />
-          <Route path="/target-jobs" element={<ProtectedRoute><TargetJobUrlPage /></ProtectedRoute>} />
+          <Route path="/jobs" element={<ProtectedRoute><JobsCenterPage /></ProtectedRoute>} />
           <Route path="/resume/history" element={<ProtectedRoute><ResumeHistoryPage /></ProtectedRoute>} />
-          <Route path="/resume/study-qa" element={<ProtectedRoute><ResumeStudyQaPage /></ProtectedRoute>} />
+          <Route path="/resume/study-qa" element={<ProtectedRoute><Navigate to="/learn" replace /></ProtectedRoute>} />
           <Route path="/resume" element={<ProtectedRoute><ResumeOptimizerPage /></ProtectedRoute>} />
           <Route path="/learn" element={<ProtectedRoute><LearnPage /></ProtectedRoute>} />
           <Route path="/interview" element={<ProtectedRoute><InterviewSimulatorPage /></ProtectedRoute>} />
+          <Route path="/history" element={<ProtectedRoute><ResumeHistoryPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Content>

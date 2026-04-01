@@ -69,6 +69,11 @@ class InterviewState(TypedDict):
     tech_stack: List[str]                      # 技术栈
     difficulty_level: str                      # 难度级别 (easy/medium/hard)
     max_questions: int                         # 最大问题数
+    company_name: Optional[str]                # 公司名称（可选）
+    company_business: Optional[str]            # 公司业务（可选）
+    job_description: Optional[str]             # 岗位JD（可选）
+    candidate_strengths: Optional[List[str]]   # 候选人优势（可选）
+    candidate_weaknesses: Optional[List[str]]  # 候选人短板（可选）
     
     # 对话状态
     conversation_history: List[InterviewMessage]  # 对话历史
@@ -118,6 +123,8 @@ class InterviewAgent:
         provider: Optional[Union[LLMProvider, str]] = None,
         model: Optional[str] = None,
         api_key: Optional[str] = None,
+        question_service: Optional["QuestionService"] = None,
+        use_hybrid_mode: bool = True,
         **llm_kwargs: Any,
     ):
         """
@@ -127,12 +134,15 @@ class InterviewAgent:
             provider: LLM 提供商 (openai/deepseek/zhipu/ollama/anthropic/qwen/bailian)
             model: 使用的模型名称
             api_key: API Key (可选，默认从环境变量读取)
+            question_service: 题库服务（用于混合模式）
+            use_hybrid_mode: 是否使用混合模式（预设计问题 +AI 生成）
             **llm_kwargs: 传递给 LLM 的其他参数
         """
         self.provider = provider
         self.model = model
         self.question_service = question_service
         self.use_hybrid_mode = use_hybrid_mode
+        self.audio_enabled = True
         
         # 初始化日志记录器
         self.logger = get_logger(__name__)
@@ -145,10 +155,23 @@ class InterviewAgent:
                 api_key=api_key,
                 **llm_kwargs,
             )
+            # 记录实际生效模型信息，便于排查“是否走了百炼/其他提供商”
+            self.logger.info(
+                "Interview LLM initialized | provider=%s model=%s base_url=%s timeout=%ss",
+                (provider.value if isinstance(provider, LLMProvider) else (provider or settings.LLM_PROVIDER)),
+                getattr(self.llm, "model_name", model or settings.LLM_MODEL or "default"),
+                getattr(self.llm, "openai_api_base", None),
+                settings.LLM_REQUEST_TIMEOUT,
+            )
             
-            # 音频处理器仍使用 OpenAI (Whisper/TTS)
+            # 音频处理器仍使用 OpenAI (Whisper/TTS)；若未配置 key 则快速降级为仅文本模式
             audio_api_key = api_key if provider in [None, LLMProvider.OPENAI, "openai"] else settings.OPENAI_API_KEY
-            self.audio_processor = AudioProcessor(api_key=audio_api_key)
+            if audio_api_key:
+                self.audio_processor = AudioProcessor(api_key=audio_api_key)
+            else:
+                self.audio_enabled = False
+                self.audio_processor = None
+                self.logger.warning("未配置 OPENAI_API_KEY，语音能力已禁用（仅文本面试）")
             
             # 构建图
             self.graph = self._build_graph()
@@ -218,6 +241,11 @@ class InterviewAgent:
         job_role = state["job_role"]
         tech_stack = state["tech_stack"]
         difficulty = state.get("difficulty_level", "medium")
+        company_name = state.get("company_name")
+        company_business = state.get("company_business")
+        job_description = state.get("job_description")
+        candidate_strengths = state.get("candidate_strengths") or []
+        candidate_weaknesses = state.get("candidate_weaknesses") or []
         
         difficulty_desc = {
             "easy": "基础级别，考察基本概念和常见用法",
@@ -268,6 +296,20 @@ class InterviewAgent:
                 except Exception as e:
                     self.logger.warning(f"题库抽取失败，切换到 LLM 模式：{str(e)}")
         
+        # ==================== 面试上下文增强 ====================
+        context_lines: List[str] = []
+        if company_name:
+            context_lines.append(f"- 公司名称：{company_name}")
+        if company_business:
+            context_lines.append(f"- 公司业务：{company_business}")
+        if job_description:
+            context_lines.append(f"- 岗位JD要点：{job_description[:600]}")
+        if candidate_strengths:
+            context_lines.append(f"- 候选人优势：{'; '.join(candidate_strengths[:5])}")
+        if candidate_weaknesses:
+            context_lines.append(f"- 候选人待提升：{'; '.join(candidate_weaknesses[:5])}")
+        context_block = "\n".join(context_lines) if context_lines else "无额外上下文"
+
         # ==================== 生成面试开场 ====================
         if question_from_bank:
             # 使用题库题目
@@ -277,12 +319,15 @@ class InterviewAgent:
 - 目标岗位：{job_role}
 - 技术栈范围：{', '.join(tech_stack)}
 - 难度级别：{difficulty} - {difficulty_desc.get(difficulty, difficulty_desc['medium'])}
+- 面试上下文：
+{context_block}
 
 面试要求：
 1. 先简单自我介绍（1-2 句话）
 2. 然后提出以下技术问题（不要修改问题本身）：
    "{question_from_bank}"
-3. 保持专业友好的态度"""
+3. 结合上下文，优先围绕岗位核心能力与候选人短板设计追问意图
+4. 保持专业友好的态度"""
         else:
             # 使用 LLM 生成
             system_prompt = f"""你是一位经验丰富的技术面试官，正在面试一位应聘「{job_role}」岗位的候选人。
@@ -291,12 +336,14 @@ class InterviewAgent:
 - 目标岗位：{job_role}
 - 技术栈范围：{', '.join(tech_stack)}
 - 难度级别：{difficulty} - {difficulty_desc.get(difficulty, difficulty_desc['medium'])}
+- 面试上下文：
+{context_block}
 
 面试要求：
 1. 每次只问一个问题
 2. 问题应该具体、明确，便于口头回答
 3. 从基础概念开始，逐渐深入
-4. 根据候选人回答情况调整后续问题
+4. 根据候选人回答情况调整后续问题，并结合岗位JD与候选人短板精准追问
 5. 保持专业友好的态度
 6. 问题应覆盖技术栈的不同方面
 
@@ -393,6 +440,10 @@ class InterviewAgent:
         current_answer = state.get("current_answer", "")
         question_count = state.get("question_count", 1)
         max_questions = state.get("max_questions", 5)
+        company_name = state.get("company_name")
+        job_description = state.get("job_description")
+        candidate_strengths = state.get("candidate_strengths") or []
+        candidate_weaknesses = state.get("candidate_weaknesses") or []
         
         # 判断是否是最后一个问题
         is_last_question = question_count >= max_questions
@@ -401,6 +452,12 @@ class InterviewAgent:
 技术栈范围：{', '.join(tech_stack)}
 
 当前是第 {question_count}/{max_questions} 个问题。
+
+上下文信息：
+- 公司：{company_name or '未知'}
+- 岗位JD要点：{(job_description or '无')[:500]}
+- 候选人优势：{'; '.join(candidate_strengths[:4]) if candidate_strengths else '无'}
+- 候选人待提升：{'; '.join(candidate_weaknesses[:4]) if candidate_weaknesses else '无'}
 
 请基于候选人的回答，以自然、专业的面试官口吻进行回复：
 1. 首先对回答进行简短的反馈（指出亮点或需要补充的地方）
@@ -533,6 +590,11 @@ class InterviewAgent:
             }
         
         try:
+            if not self.audio_enabled or self.audio_processor is None:
+                return {
+                    "audio_output": None,
+                    "current_step": "synthesize_speech",
+                }
             # 调用 TTS
             audio_base64 = self.audio_processor.synthesize_to_base64(
                 text=last_assistant_msg,
@@ -896,6 +958,11 @@ class InterviewAgent:
         tech_stack: List[str],
         difficulty_level: str = "medium",
         max_questions: int = 5,
+        company_name: Optional[str] = None,
+        company_business: Optional[str] = None,
+        job_description: Optional[str] = None,
+        candidate_strengths: Optional[List[str]] = None,
+        candidate_weaknesses: Optional[List[str]] = None,
     ) -> InterviewState:
         """
         开始面试
@@ -914,6 +981,11 @@ class InterviewAgent:
             "tech_stack": tech_stack,
             "difficulty_level": difficulty_level,
             "max_questions": max_questions,
+            "company_name": company_name,
+            "company_business": company_business,
+            "job_description": job_description,
+            "candidate_strengths": candidate_strengths or [],
+            "candidate_weaknesses": candidate_weaknesses or [],
             "conversation_history": [],
             "current_question": None,
             "current_answer": None,
@@ -974,6 +1046,16 @@ class InterviewAgent:
             state["question_count"] = 0
         if "is_finished" not in state:
             state["is_finished"] = False
+        if "company_name" not in state:
+            state["company_name"] = None
+        if "company_business" not in state:
+            state["company_business"] = None
+        if "job_description" not in state:
+            state["job_description"] = None
+        if "candidate_strengths" not in state:
+            state["candidate_strengths"] = []
+        if "candidate_weaknesses" not in state:
+            state["candidate_weaknesses"] = []
         
         state["audio_input"] = audio_input
         state["current_step"] = "process_answer"

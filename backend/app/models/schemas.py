@@ -210,6 +210,17 @@ class InterviewStartRequest(BaseModel):
         default="medium",
         description="难度级别",
     )
+    # 可选：从简历优化跳转时传入 resume_id，自动填充岗位信息
+    resume_id: Optional[int] = Field(None, description="关联的简历 ID（用于从简历优化跳转）")
+    # 可选：面试上下文专用简历（与历史 resume_id 兼容）
+    context_resume_id: Optional[int] = Field(None, description="面试上下文简历 ID（仅允许 optimized）")
+    # 可选：从“我的岗位”中选择岗位
+    saved_job_id: Optional[int] = Field(None, description="已保存岗位 ID")
+    # 可选：补充公司信息
+    company_name: Optional[str] = Field(None, description="公司名称")
+    company_business: Optional[str] = Field(None, description="公司业务")
+    # 可选：手动覆盖岗位 JD 文本
+    job_description_override: Optional[str] = Field(None, description="岗位 JD 覆盖文本")
 
 
 class InterviewMessageRequest(BaseModel):
@@ -339,6 +350,12 @@ class WSMessage(BaseModel):
     """WebSocket 消息基类"""
     type: str = Field(..., description="消息类型")
     data: Dict[str, Any] = Field(default_factory=dict)
+
+
+class InterviewRuntimeEvent(BaseModel):
+    """Interview Runtime V2 事件"""
+    type: str = Field(..., description="事件类型")
+    data: Dict[str, Any] = Field(default_factory=dict, description="事件载荷")
 
 
 class WSAudioMessage(BaseModel):

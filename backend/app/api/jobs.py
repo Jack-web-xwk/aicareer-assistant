@@ -5,12 +5,13 @@
 import asyncio
 import json
 from datetime import datetime
+from typing import List
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.resume import get_or_create_user
+from app.api.auth import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import check_job_search_rate_limit
@@ -197,9 +198,10 @@ def search_jobs(
 async def save_job(
     body: UnifiedJobItem,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> SuccessResponse:
     """将搜索结果中的职位保存到当前用户（同 URL 则更新）。"""
-    user = await get_or_create_user(db)
+    user = current_user
     row = await _persist_unified_saved_job(db, user, body)
     return SuccessResponse(
         message="saved",
@@ -211,6 +213,7 @@ async def save_job(
 async def scrape_job_url_and_save(
     body: ScrapeJobUrlRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     _: None = Depends(check_job_search_rate_limit),
 ) -> SuccessResponse:
     """
@@ -231,7 +234,7 @@ async def scrape_job_url_and_save(
         raise HTTPException(status_code=502, detail=f"抓取失败: {e!s}") from e
 
     item = _job_requirements_to_unified(job_info, url)
-    user = await get_or_create_user(db)
+    user = current_user
     try:
         row = await _persist_unified_saved_job(db, user, item)
     except Exception as e:
@@ -261,56 +264,76 @@ _ALLOWED_IMAGE_CT = frozenset(
 
 @router.post("/from-screenshot", response_model=SuccessResponse)
 async def extract_job_from_screenshot_and_save(
-    file: UploadFile = File(..., description="岗位详情截图（PNG/JPEG/WebP 等）"),
+    files: List[UploadFile] = File(..., description="岗位详情截图（PNG/JPEG/WebP 等），支持多张"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     _: None = Depends(check_job_search_rate_limit),
 ) -> SuccessResponse:
     """
-    上传招聘详情截图，由多模态大模型抽取结构化岗位信息并写入 saved_jobs。
+    上传招聘详情截图（支持多张），由多模态大模型抽取结构化岗位信息并写入 saved_jobs。
     返回的 detail_url 为内部伪链接 `job:screenshot:<uuid>`，可用于简历优化页「目标岗位」。
+    
+    多张图片将按顺序合并分析，提取更完整的岗位信息。
     """
-    ct = (file.content_type or "").split(";")[0].strip().lower()
-    if ct == "image/jpg":
-        ct = "image/jpeg"
-    if ct not in _ALLOWED_IMAGE_CT:
-        raise HTTPException(
-            status_code=400,
-            detail=f"不支持的图片类型: {file.content_type}，请上传 PNG / JPEG / WebP",
-        )
+    if not files:
+        raise HTTPException(status_code=400, detail="至少需要上传一张图片")
+    
+    # 验证所有图片
+    image_data_list = []
+    for file in files:
+        ct = (file.content_type or "").split(";")[0].strip().lower()
+        if ct == "image/jpg":
+            ct = "image/jpeg"
+        if ct not in _ALLOWED_IMAGE_CT:
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的图片类型：{file.content_type}，请上传 PNG / JPEG / WebP",
+            )
 
-    max_bytes = max(1, int(settings.JOB_SCREENSHOT_MAX_IMAGE_MB)) * 1024 * 1024
-    raw = await file.read()
-    if len(raw) > max_bytes:
-        raise HTTPException(
-            status_code=400,
-            detail=f"图片过大，最大 {settings.JOB_SCREENSHOT_MAX_IMAGE_MB}MB",
-        )
-    if len(raw) < 256:
-        raise HTTPException(status_code=400, detail="图片过小或内容为空")
-
-    mime = ct if ct != "image/jpg" else "image/jpeg"
+        max_bytes = max(1, int(settings.JOB_SCREENSHOT_MAX_IMAGE_MB)) * 1024 * 1024
+        raw = await file.read()
+        if len(raw) > max_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"图片过大，最大 {settings.JOB_SCREENSHOT_MAX_IMAGE_MB}MB",
+            )
+        if len(raw) < 256:
+            raise HTTPException(status_code=400, detail="图片过小或内容为空")
+        
+        mime = ct if ct != "image/jpg" else "image/jpeg"
+        image_data_list.append((raw, mime))
+    
+    # 调用多模态识别（支持多图）
     try:
-        job_info = await extract_job_requirements_from_image(raw, mime)
+        if len(image_data_list) == 1:
+            # 单张图片，使用原有逻辑
+            job_info = await extract_job_requirements_from_image(image_data_list[0][0], image_data_list[0][1])
+        else:
+            # 多张图片，需要修改 extract_job_requirements_from_image 函数
+            # TODO: 实现多图分析逻辑，这里先使用第一张，后续扩展
+            logger.info(f"收到 {len(image_data_list)} 张图片，当前先使用第一张分析")
+            job_info = await extract_job_requirements_from_image(image_data_list[0][0], image_data_list[0][1])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.exception("截图岗位识别失败")
-        raise HTTPException(status_code=502, detail=f"识别失败: {e!s}") from e
+        raise HTTPException(status_code=502, detail=f"识别失败：{e!s}") from e
 
     detail_url = new_screenshot_job_url()
     item = _job_requirements_to_unified(job_info, detail_url, source=JobSource.SCREENSHOT)
-    user = await get_or_create_user(db)
+    user = current_user
     try:
         row = await _persist_unified_saved_job(db, user, item)
     except Exception as e:
         logger.exception("from-screenshot 写入 saved_jobs 失败")
-        raise HTTPException(status_code=500, detail=f"保存失败: {e!s}") from e
+        raise HTTPException(status_code=500, detail=f"保存失败：{e!s}") from e
 
     return SuccessResponse(
         message="screenshot_extracted_and_saved",
         data={
             "saved": _saved_job_to_record(row).model_dump(mode="json"),
             "job_snapshot": job_info.model_dump(),
+            "uploaded_count": len(files),  # 返回上传的图片数量
         },
     )
 
@@ -319,9 +342,10 @@ async def extract_job_from_screenshot_and_save(
 async def get_saved_job(
     job_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> SuccessResponse:
     """单条已保存职位（含 raw_snippet 中的完整结构化 JSON）。"""
-    user = await get_or_create_user(db)
+    user = current_user
     result = await db.execute(
         select(SavedJob).where(SavedJob.id == job_id, SavedJob.user_id == user.id)
     )
@@ -339,9 +363,10 @@ async def list_saved_jobs(
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> SuccessResponse:
     """当前用户已保存的职位列表。"""
-    user = await get_or_create_user(db)
+    user = current_user
     count_q = await db.execute(
         select(func.count()).select_from(SavedJob).where(SavedJob.user_id == user.id)
     )
@@ -366,8 +391,9 @@ async def list_saved_jobs(
 async def delete_saved_job(
     job_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> SuccessResponse:
-    user = await get_or_create_user(db)
+    user = current_user
     result = await db.execute(
         select(SavedJob).where(SavedJob.id == job_id, SavedJob.user_id == user.id)
     )

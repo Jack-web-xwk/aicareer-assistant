@@ -50,7 +50,7 @@ python-dotenv>=1.0.0
 # Auth
 python-jose[cryptography]>=3.3.0    # JWT tokens
 passlib[bcrypt]>=1.7.4              # Password hashing
-bcrypt>=4.0.0,<5.0.0               # bcrypt 5.x 与 passlib 不兼容
+bcrypt>=4.0.0,<4.1.0                # passlib 1.7.4 与 bcrypt 4.1+ 存在版本探测兼容问题
 
 # Utilities
 httpx>=0.27.0
