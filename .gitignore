@@ -50,6 +50,9 @@ dmypy.json
 backend/uploads/*
 !backend/uploads/.gitkeep
 
+# ai-daily Gitee clone (sync script; generated content lives in frontend/public/ai-daily)
+backend/data/ai-daily-src/
+
 # ========================
 # Node.js / Frontend
 # ========================

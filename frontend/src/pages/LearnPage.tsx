@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Card,
+  Drawer,
+  Grid,
   Row,
   Col,
   Typography,
@@ -12,11 +14,13 @@ import {
   Tag,
   Empty,
   Alert,
+  Tabs,
 } from 'antd'
-import { ReadOutlined, QuestionCircleOutlined, ArrowLeftOutlined } from '@ant-design/icons'
-import ReactMarkdown from 'react-markdown'
+import { ReadOutlined, QuestionCircleOutlined, ArrowLeftOutlined, ThunderboltOutlined, MenuOutlined } from '@ant-design/icons'
 import { Link } from 'react-router-dom'
 import { learnApi, resumeApi } from '../services/api'
+import { LearningMarkdown } from '../components/LearningMarkdown'
+import AiFrontierLearning from './learn/AiFrontierLearning'
 import type { LearningPhase, LearningArticleDetail, LearningArticleListItem, StudyQaSessionListItem } from '../types'
 import type { CSSProperties } from 'react'
 
@@ -28,27 +32,6 @@ const cardStyle: CSSProperties = {
   boxShadow: 'var(--shadow-sm)',
 }
 
-const markdownComponents = {
-  h1: ({ children }: { children?: ReactNode }) => (
-    <Title level={3} style={{ color: 'var(--color-text-primary)', marginTop: 16 }}>{children}</Title>
-  ),
-  h2: ({ children }: { children?: ReactNode }) => (
-    <Title level={4} style={{ color: 'var(--color-text-primary)', marginTop: 12 }}>{children}</Title>
-  ),
-  h3: ({ children }: { children?: ReactNode }) => (
-    <Title level={5} style={{ color: 'var(--color-text-primary)', marginTop: 8 }}>{children}</Title>
-  ),
-  p: ({ children }: { children?: ReactNode }) => (
-    <Paragraph style={{ color: 'var(--color-text-secondary)' }}>{children}</Paragraph>
-  ),
-  li: ({ children }: { children?: ReactNode }) => (
-    <li style={{ color: 'var(--color-text-secondary)' }}>{children}</li>
-  ),
-  strong: ({ children }: { children?: ReactNode }) => (
-    <Text strong style={{ color: 'var(--color-text-primary)' }}>{children}</Text>
-  ),
-}
-
 function LearnPage() {
   const [searchParams] = useSearchParams()
   const [phases, setPhases] = useState<LearningPhase[]>([])
@@ -57,6 +40,10 @@ function LearnPage() {
   const [selectedArticle, setSelectedArticle] = useState<LearningArticleDetail | null>(null)
   const [articleLoading, setArticleLoading] = useState(false)
   const [studyQaRecent, setStudyQaRecent] = useState<StudyQaSessionListItem[]>([])
+
+  const [phaseDrawerOpen, setPhaseDrawerOpen] = useState(false)
+  const screens = Grid.useBreakpoint()
+  const isLgUp = Boolean(screens.lg)
   
   // URL 参数
   const resumeId = searchParams.get('resumeId')
@@ -86,7 +73,7 @@ function LearnPage() {
       } else {
         setPhases([])
       }
-    } catch (e) {
+    } catch {
       setPhases([])
     } finally {
       setLoading(false)
@@ -155,8 +142,46 @@ function LearnPage() {
     }
   }, [])
 
+  const phaseList = useMemo(() => {
+    return (
+      <Spin spinning={loading}>
+        {phases.length === 0 && !loading ? (
+          <Empty description="暂无数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        ) : (
+          <List
+            size="small"
+            dataSource={phases}
+            renderItem={(p) => (
+              <List.Item
+                style={{
+                  cursor: 'pointer',
+                  background: selectedPhaseId === p.id ? 'var(--color-primary-bg)' : undefined,
+                  borderRadius: 6,
+                  padding: '8px 12px',
+                }}
+                onClick={() => {
+                  setSelectedPhaseId(p.id)
+                  setSelectedArticle(null)
+                  setPhaseDrawerOpen(false)
+                }}
+              >
+                <Text
+                  ellipsis
+                  strong={selectedPhaseId === p.id}
+                  style={{ fontSize: 13 }}
+                >
+                  {p.subtitle ? `${p.subtitle} · ` : ''}{p.title.slice(0, 20)}…
+                </Text>
+              </List.Item>
+            )}
+          />
+        )}
+      </Spin>
+    )
+  }, [loading, phases, selectedPhaseId])
+
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+    <div className="learn-read-container">
       <Space align="center" style={{ marginBottom: 24 }}>
         <ReadOutlined style={{ fontSize: 32, color: 'var(--color-primary)' }} />
         <div>
@@ -210,116 +235,140 @@ function LearnPage() {
         ) : null}
       </Card>
 
-      <Row gutter={24}>
-        {/* 阶段导航 */}
-        <Col xs={24} md={8} lg={6}>
-          <Card size="small" style={cardStyle} title="学习阶段">
-            <Spin spinning={loading}>
-              {phases.length === 0 && !loading ? (
-                <Empty description="暂无数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              ) : (
-                <List
-                  size="small"
-                  dataSource={phases}
-                  renderItem={(p) => (
-                    <List.Item
-                      style={{
-                        cursor: 'pointer',
-                        background: selectedPhaseId === p.id ? 'var(--color-primary-bg)' : undefined,
-                        borderRadius: 6,
-                        padding: '8px 12px',
-                      }}
-                      onClick={() => {
-                        setSelectedPhaseId(p.id)
-                        setSelectedArticle(null)
-                      }}
-                    >
-                      <Text
-                        ellipsis
-                        strong={selectedPhaseId === p.id}
-                        style={{ fontSize: 13 }}
-                      >
-                        {p.subtitle ? `${p.subtitle} · ` : ''}{p.title.slice(0, 20)}…
-                      </Text>
-                    </List.Item>
-                  )}
-                />
-              )}
-            </Spin>
-          </Card>
-        </Col>
+      <Tabs
+        defaultActiveKey="column"
+        items={[
+          {
+            key: 'column',
+            label: (
+              <span>
+                <ReadOutlined /> 学无止境专栏
+              </span>
+            ),
+            children: (
+              <>
+                <Row gutter={24}>
+                  {isLgUp ? (
+                    <Col xs={24} md={7} lg={5}>
+                      <Card size="small" style={cardStyle} title="学习阶段">
+                        {phaseList}
+                      </Card>
+                    </Col>
+                  ) : null}
 
-        {/* 主区域：文章列表 或 文章详情 */}
-        <Col xs={24} md={16} lg={18}>
-          {selectedArticle ? (
-            <Card
-              style={cardStyle}
-              title={
-                <Space>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<ArrowLeftOutlined />}
-                    onClick={() => setSelectedArticle(null)}
-                  >
-                    返回
-                  </Button>
-                  <span>{selectedArticle.title}</span>
-                </Space>
-              }
-            >
-              <Spin spinning={articleLoading}>
-                <div
-                  style={{
-                    maxHeight: '70vh',
-                    overflowY: 'auto',
-                    padding: 16,
-                    background: 'var(--color-bg-secondary)',
-                    borderRadius: 8,
-                  }}
+                  <Col xs={24} md={isLgUp ? 17 : 24} lg={isLgUp ? 19 : 24}>
+                    {selectedArticle ? (
+                      <Card
+                        style={cardStyle}
+                        title={
+                          <Space>
+                            {!isLgUp ? (
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<MenuOutlined />}
+                                onClick={() => setPhaseDrawerOpen(true)}
+                              >
+                                阶段
+                              </Button>
+                            ) : null}
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<ArrowLeftOutlined />}
+                              onClick={() => setSelectedArticle(null)}
+                            >
+                              返回
+                            </Button>
+                            <span>{selectedArticle.title}</span>
+                          </Space>
+                        }
+                      >
+                        <Spin spinning={articleLoading}>
+                          <div
+                            style={{
+                              maxHeight: 'calc(100vh - 300px)',
+                              overflowY: 'auto',
+                              padding: 24,
+                            }}
+                            className="learn-read-scroll"
+                          >
+                            <LearningMarkdown content={selectedArticle.content_md || ''} />
+                          </div>
+                        </Spin>
+                      </Card>
+                    ) : (
+                      <Card
+                        style={cardStyle}
+                        title={
+                          <Space>
+                            {!isLgUp ? (
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<MenuOutlined />}
+                                onClick={() => setPhaseDrawerOpen(true)}
+                              >
+                                阶段
+                              </Button>
+                            ) : null}
+                            {currentPhase ? currentPhase.title : '选择阶段'}
+                          </Space>
+                        }
+                      >
+                        {!currentPhase ? (
+                          <Empty description="请从左侧选择学习阶段" />
+                        ) : currentPhase.articles.length === 0 ? (
+                          <Empty description="该阶段暂无文章" />
+                        ) : (
+                          <List
+                            dataSource={currentPhase.articles}
+                            renderItem={(art, idx) => (
+                              <List.Item
+                                style={{
+                                  cursor: 'pointer',
+                                  padding: '12px 0',
+                                  borderBottom: '1px solid var(--color-border)',
+                                }}
+                                onClick={() => void openArticle(art)}
+                              >
+                                <Space>
+                                  <Tag color="default">{idx + 1}</Tag>
+                                  <Text>{art.title}</Text>
+                                  {art.external_url ? <Tag color="blue">外链</Tag> : null}
+                                </Space>
+                              </List.Item>
+                            )}
+                          />
+                        )}
+                      </Card>
+                    )}
+                  </Col>
+                </Row>
+
+                <Drawer
+                  title="学习阶段"
+                  placement="left"
+                  width={320}
+                  onClose={() => setPhaseDrawerOpen(false)}
+                  open={phaseDrawerOpen}
                 >
-                  <ReactMarkdown components={markdownComponents}>
-                    {selectedArticle.content_md || '_暂无内容_'}
-                  </ReactMarkdown>
-                </div>
-              </Spin>
-            </Card>
-          ) : (
-            <Card
-              style={cardStyle}
-              title={currentPhase ? currentPhase.title : '选择阶段'}
-            >
-              {!currentPhase ? (
-                <Empty description="请从左侧选择学习阶段" />
-              ) : currentPhase.articles.length === 0 ? (
-                <Empty description="该阶段暂无文章" />
-              ) : (
-                <List
-                  dataSource={currentPhase.articles}
-                  renderItem={(art, idx) => (
-                    <List.Item
-                      style={{
-                        cursor: 'pointer',
-                        padding: '12px 0',
-                        borderBottom: '1px solid var(--color-border)',
-                      }}
-                      onClick={() => void openArticle(art)}
-                    >
-                      <Space>
-                        <Tag color="default">{idx + 1}</Tag>
-                        <Text>{art.title}</Text>
-                        {art.external_url ? (
-                          <Tag color="blue">外链</Tag>
-                        ) : null}
-                      </Space>
-                    </List.Item>
-                  )}
-                />
-              )}
-            </Card>
-          )}
-        </Col>
-      </Row>
+                  {phaseList}
+                </Drawer>
+              </>
+            ),
+          },
+          {
+            key: 'frontier',
+            label: (
+              <span>
+                <ThunderboltOutlined /> AI 前沿技术
+              </span>
+            ),
+            children: <AiFrontierLearning />,
+          },
+        ]}
+      />
     </div>
   )
 }

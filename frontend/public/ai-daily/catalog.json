@@ -1,0 +1,167 @@
+{
+  "source": "https://gitee.com/xia-weikun/ai-daily",
+  "generatedAt": "2026-04-02T07:55:57.460684Z",
+  "entries": [
+    {
+      "relpath": "daily/finetune/2026-04-02.md",
+      "title": "2026-04-02",
+      "category": "daily",
+      "section": "日报 · 微调",
+      "sortDate": "2026-04-02"
+    },
+    {
+      "relpath": "daily/inference/2026-04-02.md",
+      "title": "⚡ AI推理加速日报",
+      "category": "daily",
+      "section": "日报 · 推理加速",
+      "sortDate": "2026-04-02"
+    },
+    {
+      "relpath": "apps/2026-04-01.md",
+      "title": "🚀 AI应用实战 - 2026-04-01",
+      "category": "apps",
+      "section": "应用实战",
+      "sortDate": "2026-04-01"
+    },
+    {
+      "relpath": "daily/finetune/2026-04-01.md",
+      "title": "【🧬 AI微调日报】",
+      "category": "daily",
+      "section": "日报 · 微调",
+      "sortDate": "2026-04-01"
+    },
+    {
+      "relpath": "daily/inference/2026-04-01.md",
+      "title": "【⚡ AI推理加速日报】",
+      "category": "daily",
+      "section": "日报 · 推理加速",
+      "sortDate": "2026-04-01"
+    },
+    {
+      "relpath": "daily/models/2026-04-01.md",
+      "title": "🤖 AI大模型日报",
+      "category": "daily",
+      "section": "日报 · 大模型",
+      "sortDate": "2026-04-01"
+    },
+    {
+      "relpath": "apps/2026-03-31.md",
+      "title": "🚀 AI应用实战 - 2026-03-31",
+      "category": "apps",
+      "section": "应用实战",
+      "sortDate": "2026-03-31"
+    },
+    {
+      "relpath": "daily/inference/2026-03-31.md",
+      "title": "⚡ AI推理加速日报 - 2026-03-31",
+      "category": "daily",
+      "section": "日报 · 推理加速",
+      "sortDate": "2026-03-31"
+    },
+    {
+      "relpath": "daily/models/2026-03-31.md",
+      "title": "🤖 AI大模型日报 - 2026-03-31",
+      "category": "daily",
+      "section": "日报 · 大模型",
+      "sortDate": "2026-03-31"
+    },
+    {
+      "relpath": "daily/finetune/2026-03-30.md",
+      "title": "🧬 AI微调日报 - 2026-03-30",
+      "category": "daily",
+      "section": "日报 · 微调",
+      "sortDate": "2026-03-30"
+    },
+    {
+      "relpath": "daily/inference/2026-03-30.md",
+      "title": "⚡ AI推理加速日报 - 2026-03-30",
+      "category": "daily",
+      "section": "日报 · 推理加速",
+      "sortDate": "2026-03-30"
+    },
+    {
+      "relpath": "daily/models/2026-03-30.md",
+      "title": "🤖 AI大模型日报 - 2026-03-30",
+      "category": "daily",
+      "section": "日报 · 大模型",
+      "sortDate": "2026-03-30"
+    },
+    {
+      "relpath": "apps/2026-03-29.md",
+      "title": "🚀 AI应用实战 - 2026-03-29",
+      "category": "apps",
+      "section": "应用实战",
+      "sortDate": "2026-03-29"
+    },
+    {
+      "relpath": "daily/finetune/2026-03-29.md",
+      "title": "🧬 AI微调日报 - 2026-03-29",
+      "category": "daily",
+      "section": "日报 · 微调",
+      "sortDate": "2026-03-29"
+    },
+    {
+      "relpath": "daily/inference/2026-03-29.md",
+      "title": "⚡ AI推理加速日报 - 2026-03-29",
+      "category": "daily",
+      "section": "日报 · 推理加速",
+      "sortDate": "2026-03-29"
+    },
+    {
+      "relpath": "daily/models/2026-03-29.md",
+      "title": "🤖 AI大模型日报 - 2026-03-29",
+      "category": "daily",
+      "section": "日报 · 大模型",
+      "sortDate": "2026-03-29"
+    },
+    {
+      "relpath": "apps/2026-03-28.md",
+      "title": "AI应用实战日报 - 2026年3月28日",
+      "category": "apps",
+      "section": "应用实战",
+      "sortDate": "2026-03-28"
+    },
+    {
+      "relpath": "daily/finetune/2026-03-28.md",
+      "title": "AI微调技术日报 - 2026年3月28日",
+      "category": "daily",
+      "section": "日报 · 微调",
+      "sortDate": "2026-03-28"
+    },
+    {
+      "relpath": "daily/inference/2026-03-28.md",
+      "title": "⚡ AI推理加速日报 - 2026-03-28",
+      "category": "daily",
+      "section": "日报 · 推理加速",
+      "sortDate": "2026-03-28"
+    },
+    {
+      "relpath": "daily/models/2026-03-28.md",
+      "title": "🤖 AI大模型日报 - 2026-03-28",
+      "category": "daily",
+      "section": "日报 · 大模型",
+      "sortDate": "2026-03-28"
+    },
+    {
+      "relpath": "weekly/inference/2026-03-28.md",
+      "title": "⚡ AI推理加速周报 - 03.23-03.30",
+      "category": "weekly",
+      "section": "周报 · 推理加速",
+      "sortDate": "2026-03-28"
+    },
+    {
+      "relpath": "weekly/models/2026-03-23-03-30.md",
+      "title": "🤖 AI大模型周报 - 03.23-03.30",
+      "category": "weekly",
+      "section": "周报 · 大模型",
+      "sortDate": "2026-03-23"
+    },
+    {
+      "relpath": "weekly/finetune/03.30.md",
+      "title": "🧬 AI微调周报 - 03.24-03.30",
+      "category": "weekly",
+      "section": "周报 · 微调",
+      "sortDate": null
+    }
+  ]
+}

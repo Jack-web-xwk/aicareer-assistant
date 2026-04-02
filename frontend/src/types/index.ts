@@ -192,6 +192,23 @@ export interface LearningArticleDetail {
   updated_at: string
 }
 
+/** 构建期同步的 Gitee ai-daily 目录（frontend/public/ai-daily/catalog.json） */
+export type AiDailyCategoryKey = 'daily' | 'weekly' | 'apps'
+
+export interface AiDailyCatalogEntry {
+  relpath: string
+  title: string
+  category: AiDailyCategoryKey
+  section: string
+  sortDate: string | null
+}
+
+export interface AiDailyCatalog {
+  source: string
+  generatedAt: string
+  entries: AiDailyCatalogEntry[]
+}
+
 /** GET /resume/history 列表项（无完整正文） */
 export interface ResumeHistoryListItem {
   id: number
