@@ -10,6 +10,7 @@ import {
   ReadOutlined,
   UserOutlined,
   LogoutOutlined,
+  GithubOutlined,
 } from '@ant-design/icons'
 import { useState, useEffect } from 'react'
 import HomePage from './pages/HomePage'
@@ -183,6 +184,21 @@ function AppLayout() {
               borderBottom: 'none',
             }}
           />
+          <a
+            href="https://github.com/Jack-web-xwk/aicareer-assistant"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              fontSize: '20px',
+              color: '#6366f1',
+              cursor: 'pointer',
+              transition: 'color 0.3s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = '#8b5cf6')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#6366f1')}
+          >
+            <GithubOutlined />
+          </a>
           {token && (
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
               <Avatar
